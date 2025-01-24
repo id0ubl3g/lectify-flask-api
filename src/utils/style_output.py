@@ -18,7 +18,7 @@ def print_welcome_message() -> None:
  \ \_____\\ \_\ \_\\ \_\\ \_____\\ \_\   \ \_____\\/\_____\
   \/_____/ \/_/ /_/ \/_/ \/_____/ \/_/    \/_____/ \/_____/
             
-        {RESET}{BLUE}Smart {PURPLE}API{BLUE} for summarizing video lectures with clear explanations.{RESET}{BLUE}
+        {RESET}{BLUE}AI-powered {PURPLE}API{BLUE} to summarize video lectures with detailed insights.{RESET}{BLUE}
     
     [*]__author__: {RESET}George Victor | @id0ubl3g{BLUE}
     [*]__github__: {RESET}github.com/id0ubl3g/briefly-flask-api{BLUE}
