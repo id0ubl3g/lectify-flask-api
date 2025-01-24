@@ -1,5 +1,6 @@
 import sys
 import os
+
 def add_project_root_to_path() -> None:
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 add_project_root_to_path()
@@ -10,12 +11,9 @@ from src.modules.generative_ai import GenerativeAI
 from src.modules.document_builder import DocumentBuilder
 from src.modules.convert_document import ConvertDocument
 
-from src.utils.return_responses import *
 from src.utils.style_output import *
 
 from config.prompt_config import *
-
-import sys
 
 class ProcessOrchestrator:
     def __init__(self) -> None:
@@ -34,12 +32,10 @@ class ProcessOrchestrator:
             return
     
         except KeyboardInterrupt:
-            print(f'\n{ORANGE}[!]{RESET} Operation interrupted by user')
-            sys.exit(1)
+            interruption_message()
 
         except Exception:
-            print(print(response_audio_downloader['message']))
-            sys.exit(1)
+            exception_error('audio downloading')
 
     def process_audio_recognition(self, audio_path: str) -> None:
         try:
@@ -50,12 +46,10 @@ class ProcessOrchestrator:
             return
 
         except KeyboardInterrupt:
-            print(f'\n{ORANGE}[!]{RESET} Operation interrupted by user')
-            sys.exit(1)
+            interruption_message()
 
         except Exception:
-            print(response_audio_recognition['message'])
-            sys.exit(1)
+            exception_error('audio recognition')
 
     def process_generative_ai(self, input_text: str) -> None:
         try:
@@ -66,12 +60,10 @@ class ProcessOrchestrator:
             return
         
         except KeyboardInterrupt:
-            print(f'\n{ORANGE}[!]{RESET} Operation interrupted by user')
-            sys.exit(1)
+            interruption_message()
 
         except Exception:
-            create_error_return_response(f'\n{RED}[x] Error processing Generative AI response{RESET}')
-            sys.exit(1)
+            exception_error('Generative AI processing')
     
     def process_document_builder(self, data_generative_ai: str) -> None:
         try:
@@ -82,11 +74,10 @@ class ProcessOrchestrator:
             return
         
         except KeyboardInterrupt:
-            print(f'\n{ORANGE}[!]{RESET} Operation interrupted by user')
-            sys.exit(0)
+            interruption_message()
 
         except Exception:
-            create_error_return_response(f'\n{RED}[x] Error during document building{RESET}')
+            exception_error('document building')
 
     def process_convert_document(self, input_document_path: str) -> None:
         try:
@@ -97,11 +88,10 @@ class ProcessOrchestrator:
             return
         
         except KeyboardInterrupt:
-            print(f'\n{ORANGE}[!]{RESET} Operation interrupted by user')
-            sys.exit(0)
+            interruption_message()
 
         except Exception:
-            create_error_return_response(f'\n{RED}[x] Error during document conversion{RESET}')
+            exception_error('document conversion')
 
     def process_workflow(self, youtube_url: str) -> None:
         try:
@@ -113,9 +103,7 @@ class ProcessOrchestrator:
             self.process_convert_document(self.response_document_output_path)
         
         except KeyboardInterrupt:
-            print(f'\n{ORANGE}[!]{RESET} Operation interrupted by user')
-            sys.exit(0)
+            interruption_message()
 
         except Exception:
-            create_error_return_response(f'\n{RED}[x] Error during the workflow{RESET}')
-    
+            exception_error('workflow')
