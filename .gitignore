@@ -22,3 +22,6 @@ tests/
 
 # Audio files
 *.wav
+
+# Markdown files
+*.md
