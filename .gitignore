@@ -19,3 +19,6 @@ tests/
 # Docker 
 
 *.tar
+
+# Audio files
+*.wav
