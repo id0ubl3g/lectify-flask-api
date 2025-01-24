@@ -25,3 +25,6 @@ tests/
 
 # Markdown files
 *.md
+
+# PDF files
+*.pdf
