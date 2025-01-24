@@ -1,0 +1,21 @@
+# Byte-compiled
+__pycache__/
+
+# Environments
+
+.venv
+.env
+
+# Database
+temp/
+
+# IDE 
+
+.vscode/
+
+# Ignore the test folder
+tests/
+
+# Docker 
+
+*.tar
