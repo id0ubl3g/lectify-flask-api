@@ -67,7 +67,7 @@ class ProcessOrchestrator:
     
     def process_document_builder(self, data_generative_ai: str) -> None:
         try:
-            self.response_document_output_path = f'{self.response_audio_path_downloader.replace(".wav", "")}(Briefly).md'
+            self.response_document_output_path = f'{self.response_audio_path_downloader.replace(".wav", "")}(Lectify).md'
             response_document_builder = DocumentBuilder().build_document(data_generative_ai, self.response_document_output_path)
             print(response_document_builder['message'])
 

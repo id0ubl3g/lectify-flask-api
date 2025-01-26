@@ -11,17 +11,16 @@ import sys
 
 def welcome_message() -> None:
     print(rf'''{BLUE}{BOLD}
+ __       ______   ______   ______  __   ______  __  __   
+/\ \     /\  ___\ /\  ___\ /\__  _\/\ \ /\  ___\/\ \_\ \  
+\ \ \____\ \  __\ \ \ \____\/_/\ \/\ \ \\ \  __\\ \____ \ 
+ \ \_____\\ \_____\\ \_____\  \ \_\ \ \_\\ \_\   \/\_____\
+  \/_____/ \/_____/ \/_____/   \/_/  \/_/ \/_/    \/_____/
 
- ______   ______   __   ______   ______  __       __  __   
-/\  == \ /\  == \ /\ \ /\  ___\ /\  ___\/\ \     /\ \_\ \  
-\ \  __< \ \  __< \ \ \\ \  __\ \ \  __\\ \ \____\ \____ \ 
- \ \_____\\ \_\ \_\\ \_\\ \_____\\ \_\   \ \_____\\/\_____\
-  \/_____/ \/_/ /_/ \/_/ \/_____/ \/_/    \/_____/ \/_____/
-            
         {RESET}{BLUE}AI-powered {PURPLE}API{BLUE} to summarize video lectures with detailed insights.{RESET}{BLUE}
     
     [*]__author__: {RESET}George Victor | @id0ubl3g{BLUE}
-    [*]__github__: {RESET}github.com/id0ubl3g/briefly-flask-api{BLUE}
+    [*]__github__: {RESET}github.com/id0ubl3g/lectify-flask-api{BLUE}
 ''')
     
 def loading_bar() -> None:
