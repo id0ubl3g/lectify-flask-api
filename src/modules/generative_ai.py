@@ -10,10 +10,10 @@ load_dotenv()
 
 class GenerativeAI:
     def __init__(self) -> None:
-        self.api_key: str = os.getenv("api_key_generativeai")
+        self.api_key: str = os.getenv('api_key_generativeai')
         genai.configure(api_key=self.api_key)
 
-        os.environ["GRPC_VERBOSITY"] = "NONE"
+        os.environ["GRPC_VERBOSITY"] = 'NONE'
         
         self.generation_config:  Dict[str, Union[int, float, str]] = {
                     "temperature": 0,
@@ -23,12 +23,8 @@ class GenerativeAI:
                     "response_mime_type": "text/plain",
                 }
         
-        try:
-            self.model = self._initialize_model()
+        self.model: genai.GenerativeModel = self._initialize_model()
         
-        except Exception:
-            exception_error('GenerativeModel initialization')
-
     def _initialize_model(self) -> None:
         return genai.GenerativeModel(
             model_name="gemini-1.5-flash",
@@ -44,6 +40,4 @@ class GenerativeAI:
         
         except KeyboardInterrupt:
             interruption_message()
-        
-        except Exception:
-            exception_error('chat generation')
+

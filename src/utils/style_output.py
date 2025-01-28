@@ -36,16 +36,6 @@ def loading_bar() -> None:
     print(f'\r\t')
     sleep(1.5)
 
-def exception_error(operation: str) -> None:
-    sleep(0.5)
-    print(f'\n{RED}[x]{RESET} Error during {operation}')
-    sys.exit(1)
-
-def custom_error_message(message: str):
-    sleep(0.5)
-    print(f'\n{RED}[x]{RESET} {message}')
-    sys.exit(1)
-
 def interruption_message() -> None:
     sleep(0.5)
     print(f'\n{ORANGE}[!]{RESET} Operation interrupted by user')

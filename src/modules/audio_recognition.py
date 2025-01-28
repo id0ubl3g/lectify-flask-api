@@ -17,12 +17,3 @@ class AudioRecognition:
 
         except KeyboardInterrupt:
             interruption_message()
-
-        except sr.UnknownValueError:
-            custom_error_message('Unable to understand the audio')
-            
-        except sr.RequestError:
-            custom_error_message('Error in service request')
-        
-        except Exception:
-            exception_error('audio recognition')
