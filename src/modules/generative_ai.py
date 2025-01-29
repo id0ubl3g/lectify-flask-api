@@ -13,7 +13,7 @@ class GenerativeAI:
         self.api_key: str = os.getenv('api_key_generativeai')
         genai.configure(api_key=self.api_key)
 
-        os.environ["GRPC_VERBOSITY"] = 'NONE'
+        os.environ["GRPC_VERBOSITY"] = "NONE"
         
         self.generation_config:  Dict[str, Union[int, float, str]] = {
                     "temperature": 0,
@@ -25,7 +25,7 @@ class GenerativeAI:
         
         self.model: genai.GenerativeModel = self._initialize_model()
         
-    def _initialize_model(self) -> None:
+    def _initialize_model(self) -> genai.GenerativeModel:
         return genai.GenerativeModel(
             model_name="gemini-1.5-flash",
             generation_config=self.generation_config

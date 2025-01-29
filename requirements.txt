@@ -1,4 +1,5 @@
 annotated-types==0.7.0
+attrs==25.1.0
 blinker==1.9.0
 Brotli==1.1.0
 cachetools==5.5.1
@@ -7,6 +8,7 @@ cffi==1.17.1
 charset-normalizer==3.4.1
 click==8.1.8
 cssselect2==0.7.0
+flasgger==0.9.7.1
 Flask==3.1.0
 Flask-Cors==5.0.0
 fonttools==4.55.5
@@ -23,8 +25,12 @@ httplib2==0.22.0
 idna==3.10
 itsdangerous==2.2.0
 Jinja2==3.1.5
+jsonschema==4.23.0
+jsonschema-specifications==2024.10.1
 Markdown==3.7
 MarkupSafe==3.0.2
+mistune==3.1.0
+packaging==24.2
 pillow==11.1.0
 proto-plus==1.25.0
 protobuf==5.29.3
@@ -37,8 +43,12 @@ pydyf==0.11.0
 pyparsing==3.2.1
 pyphen==0.17.2
 python-dotenv==1.0.1
+PyYAML==6.0.2
+referencing==0.36.2
 requests==2.32.3
+rpds-py==0.22.3
 rsa==4.9
+six==1.17.0
 SpeechRecognition==3.14.0
 tinycss2==1.4.0
 tinyhtml5==2.0.0

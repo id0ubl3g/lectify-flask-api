@@ -17,7 +17,7 @@ def welcome_message() -> None:
  \ \_____\\ \_____\\ \_____\  \ \_\ \ \_\\ \_\   \/\_____\
   \/_____/ \/_____/ \/_____/   \/_/  \/_/ \/_/    \/_____/
 
-        {RESET}{BLUE}AI-powered {PURPLE}API{BLUE} to summarize video lectures with detailed insights.{RESET}{BLUE}
+        {RESET}{BLUE}AI-powered Flask {PURPLE}API{BLUE} to summarize video lectures with detailed insights.{RESET}{BLUE}
     
     [*]__author__: {RESET}George Victor | @id0ubl3g{BLUE}
     [*]__github__: {RESET}github.com/id0ubl3g/lectify-flask-api{BLUE}
@@ -34,7 +34,7 @@ def loading_bar() -> None:
         sys.stdout.flush()
         sleep(0.15)
     print(f'\r\t')
-    sleep(1.5)
+    sleep(1)
 
 def interruption_message() -> None:
     sleep(0.5)

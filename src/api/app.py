@@ -1,18 +1,12 @@
-import sys
-import os
-
-def add_project_root_to_path() -> None:
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-add_project_root_to_path()
-
 from src.modules.audio_downloader import AudioDownloader
 from src.modules.audio_recognition import AudioRecognition
 from src.modules.generative_ai import GenerativeAI
 from src.modules.document_builder import DocumentBuilder
 from src.modules.convert_document import ConvertDocument
 
+from docs.flasgger import init_flasgger
+
 from src.utils.system_utils import *
-from src.utils.style_output import *
 
 from config.prompt_config import *
 
@@ -43,6 +37,7 @@ class Server:
         self.max_url_length = 200
 
         self._register_routes()
+        init_flasgger(self.app)
     
     def reset_values(self):
         self.youtube_url: Optional[str] = None
@@ -157,6 +152,5 @@ class Server:
                 self.reset_values()
                 
     def run_development(self, host: str = '0.0.0.0', port: int = 5000) -> None:
-        welcome_message()
         self.app.run(debug=True, host=host, port=port, use_reloader=True)
 
