@@ -3,6 +3,7 @@ from src.modules.audio_recognition import AudioRecognition
 from src.modules.generative_ai import GenerativeAI
 from src.modules.document_builder import DocumentBuilder
 from src.modules.convert_document import ConvertDocument
+from src.modules.extract_text import ExtractText
 
 from docs.flasgger import init_flasgger
 
@@ -11,11 +12,14 @@ from src.utils.system_utils import *
 from config.prompt_config import *
 
 from flask import Flask, request, jsonify, send_file, Response
+from werkzeug.utils import secure_filename
 from typing import List, Optional
 import speech_recognition as sr
 from flask_cors import CORS
 import requests
 import yt_dlp
+import magic
+import json
 import re
 
 class Server:
@@ -29,23 +33,48 @@ class Server:
         self.required_fields: List['str'] = ['youtube_url', 'output_format']
         self.valid_formats: List['str'] = ['pdf', 'md']
 
+        self.expected_mime_types: Dict[str, str] = {
+            'md': 'text/markdown',
+            'pdf': 'application/pdf',
+        }
+
+        self.blocked_extensions: Dict[str] = {
+            '.py', '.sh', '.bat', '.cmd', '.ps1', '.exe', '.js',
+            '.msi', '.vbs', '.wsf', '.jar', '.scr', '.cpl',
+            '.hta', '.wsh', '.scf', '.lnk', '.reg', '.inf',
+            '.iso', '.dmg',
+            '.docm', '.xlsm', '.pptm',
+            '.dotm', '.xltm', '.ppsm',
+            '.odt',                                              
+            '.zip', '.tar', '.tar.gz', '.rar', '.7z',
+            '.apk',
+            '.dll', '.drv', '.vxd', '.sys',
+            '.bak', '.old', '.swp',
+            '.chm', '.mdb', '.sql', '.db'
+        }
+
+        self.output_path: str = 'src/temp'
+        self.filepath_secure: str = None
+
         self.file_root_markdown: str = None
         self.file_root_pdf: str = None
         self.file_root_audio: str = None
 
-        self.youtube_regex = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
-        self.max_url_length = 200
+        self.youtube_regex: str = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
+        self.max_url_length: int = 200
 
         self._register_routes()
         init_flasgger(self.app)
     
-    def reset_values(self):
+    def reset_values(self) -> None:
         self.youtube_url: Optional[str] = None
         self.output_format: Optional[str] = None
 
         self.file_root_markdown: str = None
         self.file_root_pdf: str = None
         self.file_root_audio: str = None
+
+        self.filepath_secure: str = None
 
     def create_error_response(self, message: str, code: int) -> Response:
         return jsonify({'error': message}), code
@@ -78,7 +107,7 @@ class Server:
 
                 if self.output_format not in self.valid_formats:
                     return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_formats)}", 400)
-
+                
                 try:
                     response_audio_downloader = AudioDownloader().download_audio(self.youtube_url)
                     print(response_audio_downloader['message'])
@@ -90,23 +119,27 @@ class Server:
                     self.file_root_audio = os.path.abspath(relative_path_audio)
                     self.file_root_markdown = os.path.abspath(relative_path_markdown)
                     self.file_root_pdf = os.path.abspath(relative_path_pdf)
+                    
                     try:
                         response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio)
                         merged_prompt = f'{prompt}\n{response_audio_recognition['data']}'
                         print(response_audio_recognition['message'])
+                        
                         try:
                             response_generative_ai = GenerativeAI().start_chat(merged_prompt)
                             print(response_generative_ai['message'])
+                            
                             try:
                                 response_document_builder = DocumentBuilder().build_document(response_generative_ai['data'], relative_path_markdown)
                                 print(response_document_builder['message'])
+                                
                                 try:
                                     response_convert_document = ConvertDocument().markdown_to_pdf(relative_path_markdown, relative_path_pdf)
                                     print(response_convert_document['message'])
 
                                     match self.output_format:
                                         case 'md':
-                                            return send_file(self.file_root_markdown, as_attachment=True), 201
+                                            return send_file(self.file_root_markdown, mimetype='text/markdown', as_attachment=True), 201
                                         
                                         case 'pdf':
                                             return send_file(self.file_root_pdf, as_attachment=True), 201
@@ -150,7 +183,103 @@ class Server:
             finally:
                 clean_up(self.file_root_markdown, self.file_root_pdf, self.file_root_audio)
                 self.reset_values()
+        
+        @self.app.route('/lectify/questions', methods=['POST'])
+        def lectify_questions() -> Response:
+            try:
+                received_file = request.files['file']
+
+                if not received_file:
+                    return self.create_error_response('No files received', 400)
+
+                file_size_bytes = len(received_file.read())
+                received_file.seek(0)
+                file_size_mb = (file_size_bytes / 1024) / 1024
+
+                if file_size_mb > 5:
+                    return self.create_error_response('File size exceeds the maximum limit of 5 MB.', 413)
+
+                if not os.path.exists(self.output_path):
+                    os.makedirs(self.output_path)
                 
+                filename_nosecure = received_file.filename
+                filename_secure = secure_filename(filename_nosecure)
+                self.filepath_secure = os.path.join(self.output_path, filename_secure)
+
+                if len(filename_secure) > 200:
+                    return self.create_error_response('File name exceeds the maximum length of 100 characters.', 400)
+
+                file_extension = self.filepath_secure.split('.')[-1].lower()
+
+                if file_extension not in self.valid_formats:
+                    return self.create_error_response(f'Invalid format. Supported formats: {", ".join(self.valid_formats)}', 400)
+                
+                received_file.save(self.filepath_secure)
+                
+                mime_detector = magic.Magic(mime=True)
+                expected_mime_type = self.expected_mime_types.get(file_extension)
+                detected_mime_type = mime_detector.from_file(self.filepath_secure)
+
+                for extensions in self.blocked_extensions:
+                    if extensions in filename_secure:
+                        return self.create_error_response(f'The filename seems suspicious and contains a blocked extension: {extensions}', 400)
+
+                if expected_mime_type == 'text/markdown' and detected_mime_type == 'text/x-script.python' and 'Lectify' in filename_secure:
+                    detected_mime_type = 'text/markdown'
+                
+                if expected_mime_type == 'text/markdown' and detected_mime_type == 'text/plain' and 'Lectify' in filename_secure:
+                    detected_mime_type = 'text/markdown'
+                
+                if detected_mime_type != expected_mime_type:
+                    return self.create_error_response(f'Invalid file type. Detected: {detected_mime_type}. Expected: {expected_mime_type}', 400)
+
+                match file_extension:
+                    case 'md':
+                        try:
+                            responde_extract_text_markdown = ExtractText().extract_text_markdown(self.filepath_secure)
+                            merged_prompt_questions = f'{prompt_questions}\n{responde_extract_text_markdown['data']}'
+                            print(responde_extract_text_markdown['message'])
+                            
+                            try:
+                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
+                                print(response_generative_ai['message'])
+
+                                response_generative_ai_json = json.loads(response_generative_ai['data'])
+                                
+                                return jsonify(response_generative_ai_json), 200
+                            
+                            except Exception:
+                                return self.create_error_response("Error during chat generation", 400)
+                        
+                        except Exception:
+                            return self.create_error_response('Error during extraction of Markdown text', 400)
+
+                    case 'pdf':
+                        try:
+                            responde_extract_text_pdf = ExtractText().extract_text_pdf(self.filepath_secure)
+                            merged_prompt_questions = f'{prompt_questions}\n{responde_extract_text_pdf['data']}'
+                            print(responde_extract_text_pdf['message'])
+                            
+                            try:
+                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
+                                print(response_generative_ai['message'])
+
+                                response_generative_ai_json = json.loads(response_generative_ai['data'])
+                                return jsonify(response_generative_ai_json), 200
+
+                            except Exception:
+                                return self.create_error_response("Error during chat generation", 400)
+
+                        except Exception:
+                            return self.create_error_response('Error during extraction of PDF text', 400)
+            
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request', 500)
+            
+            finally:
+                clean_up(self.filepath_secure)
+                self.reset_values()
+
     def run_development(self, host: str = '0.0.0.0', port: int = 5000) -> None:
         self.app.run(debug=True, host=host, port=port, use_reloader=True)
 

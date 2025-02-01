@@ -4,10 +4,10 @@ from src.utils.style_output import *
 class DocumentBuilder:
     def build_document(self, data_generative_ai: str, document_output_path: str) -> dict:
         try:      
-            with open(document_output_path, 'w') as file:
+            with open(document_output_path, 'w', encoding='utf-8') as file:
                 file.write(data_generative_ai)
             
-            return create_success_return_response(f'\n{GREEN}[v]{RESET} Document successfully built')
+            return create_success_return_response(f'\n{GREEN}[v]{RESET} Markdown document successfully built')
 
         except KeyboardInterrupt:
             interruption_message()

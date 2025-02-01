@@ -1,5 +1,6 @@
 annotated-types==0.7.0
 attrs==25.1.0
+beautifulsoup4==4.12.3
 blinker==1.9.0
 Brotli==1.1.0
 cachetools==5.5.1
@@ -7,6 +8,7 @@ certifi==2024.12.14
 cffi==1.17.1
 charset-normalizer==3.4.1
 click==8.1.8
+cryptography==44.0.0
 cssselect2==0.7.0
 flasgger==0.9.7.1
 Flask==3.1.0
@@ -31,6 +33,8 @@ Markdown==3.7
 MarkupSafe==3.0.2
 mistune==3.1.0
 packaging==24.2
+pdfminer.six==20231228
+pdfplumber==0.11.5
 pillow==11.1.0
 proto-plus==1.25.0
 protobuf==5.29.3
@@ -41,14 +45,17 @@ pydantic==2.10.6
 pydantic_core==2.27.2
 pydyf==0.11.0
 pyparsing==3.2.1
+pypdfium2==4.30.1
 pyphen==0.17.2
 python-dotenv==1.0.1
+python-magic==0.4.27
 PyYAML==6.0.2
 referencing==0.36.2
 requests==2.32.3
 rpds-py==0.22.3
 rsa==4.9
 six==1.17.0
+soupsieve==2.6
 SpeechRecognition==3.14.0
 tinycss2==1.4.0
 tinyhtml5==2.0.0

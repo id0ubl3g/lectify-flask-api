@@ -7,7 +7,7 @@ import markdown
 class ConvertDocument:
     def markdown_to_pdf(self, input_document_path: str, output_document_path: str) -> dict:
         try:
-            with open(input_document_path, 'r') as file:
+            with open(input_document_path, 'r', encoding='utf-8') as file:
                 md_content = file.read()
 
             HTML(string=markdown.markdown(md_content)).write_pdf(output_document_path)

@@ -25,3 +25,32 @@ prompt = '''Leia o trecho fornecido e crie um resumo didático em formato Markdo
     
 ### Trecho para trabalhar:
 '''
+
+prompt_questions = '''Leia o trecho fornecido e crie 5 questões de múltipla escolha em formato JSON, com base no conteúdo. Cada questão deve ser clara, objetiva e ajudar a avaliar o entendimento do tema apresentado.
+
+### Exemplo Formato JSON:
+As questões devem ser organizadas em um objeto JSON com 5 propriedades, uma para cada questão. Abaixo está um exemplo de como o formato JSON deve ser:
+
+{
+    "questão1": {
+        "pergunta": "Texto da pergunta.",
+        "alternativas": [
+            "Alternativa A",
+            "Alternativa B",
+            "Alternativa C",
+            "Alternativa D"
+        ],
+        "dica": "Dica para ajudar na resposta.",
+        "resposta_correta": "Alternativa correta",
+        "justificativa": "Explicação sobre a resposta correta."
+    },
+    "questão2": { ... },
+    "questão3": { ... },
+    "questão4": { ... },
+    "questão5": { ... }
+}
+
+**Importante:** Forneça apenas as 5 questões no formato JSON especificado. Não adicione explicações extras ou formatação adicional. Apenas crie o JSON com as perguntas, alternativas, respostas corretas e justificativas, conforme o exemplo fornecido. Certifique-se de não incluir a marcação de código (como ```json```) ao formatar as questões em JSON.
+
+### Trecho para trabalhar:
+'''
