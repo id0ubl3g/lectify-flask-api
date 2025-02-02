@@ -13,7 +13,7 @@ def init_flasgger(app: Flask) -> None:
         'paths': {
             '/lectify/summarize': {
                 'post': {
-                    'tags': ['Audio Processing'],
+                    'tags': ['Summarize'],
                     'consumes': ['application/json'],
                     'parameters': [
                         {
@@ -31,7 +31,7 @@ def init_flasgger(app: Flask) -> None:
                                     },
                                     'output_format': {
                                         'type': 'string',
-                                        'description': 'Desired output format (e.g., md or pdf).',
+                                        'description': 'Desired output format (md or pdf).',
                                         'example': 'pdf'
                                     }
                                 },
@@ -51,58 +51,55 @@ def init_flasgger(app: Flask) -> None:
                             'description': 'Bad request due to specific errors.',
                             'examples': {
                                 'No data provided': {
-                                    'message': 'No data provided'
+                                    'error': 'No data provided'
                                 },
                                 'Missing required fields': {
-                                    'message': 'Missing required fields: {missing_fields_str}'
+                                    'error': 'Missing required fields: {missing_fields_str}'
                                 },
                                 'Missing YouTube URL': {
-                                    'message': 'Missing YouTube URL'
+                                    'error': 'Missing YouTube URL'
                                 },
                                 'URL exceeds maximum length': {
-                                    'message': 'URL exceeds maximum length of {self.max_url_length} characters'
+                                    'error': 'URL exceeds maximum length of {self.max_url_length} characters'
                                 },
                                 'Invalid YouTube URL': {
-                                    'message': 'Invalid YouTube URL'
+                                    'error': 'Invalid YouTube URL'
                                 },
                                 'Unsupported format': {
-                                    'message': 'Invalid format. Supported formats: {", ".join(self.valid_formats)}'
+                                    'error': 'Invalid format. Supported formats: {", ".join(self.valid_formats)}'
                                 },
                                 'File not found': {
-                                    'message': 'File not found'
+                                    'error': 'File not found'
                                 },
                                 'Document conversion error': {
-                                    'message': 'Error during document conversion'
+                                    'error': 'Error during document conversion'
                                 },
                                 'OS error': {
-                                    'message': 'OS error occurred while handling the file'
+                                    'error': 'OS error occurred while handling the file'
                                 },
                                 'Document building error': {
-                                    'message': 'Error during document building'
+                                    'error': 'Error during document building'
                                 },
                                 'Chat generation error': {
-                                    'message': 'Error during chat generation'
+                                    'error': 'Error during chat generation'
                                 },
                                 'Unable to understand the audio': {
-                                    'message': 'Unable to understand the audio'
+                                    'error': 'Unable to understand the audio'
                                 },
                                 'Service request error': {
-                                    'message': 'Error in service request'
+                                    'error': 'Error in service request'
                                 },
                                 'Audio recognition error': {
-                                    'message': 'Error during audio recognition'
+                                    'error': 'Error during audio recognition'
                                 },
                                 'Download error': {
-                                    'message': 'Download error occurred. Please check the URL and your network connection'
+                                    'error': 'Download error occurred. Please check the URL and your network connection'
                                 },
                                 'Network error': {
-                                    'message': 'Network error. Please check your internet connection'
+                                    'error': 'Network error. Please check your internet connection'
                                 },
                                 'Audio downloading error': {
-                                    'message': 'Error during audio downloading'
-                                },
-                                'Request processing error': {
-                                    'message': 'An error occurred while processing the request'
+                                    'error': 'Error during audio downloading'
                                 }
                             }
                         },
@@ -110,7 +107,111 @@ def init_flasgger(app: Flask) -> None:
                             'description': 'Internal server error.',
                             'examples': {
                                 'Processing error': {
-                                    'message': 'An error occurred while processing the request'
+                                    'error': 'An error occurred while processing the request'
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            '/lectify/questions': {
+                'post': {
+                    'tags': ['Questions'],
+                    'consumes': ['multipart/form-data'],
+                    'parameters': [
+                        {
+                            'name': 'file',
+                            'in': 'formData',
+                            'type': 'file',
+                            'required': True,
+                            'description': 'The file to be processed for generating questions.',
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Questions successfully generated from the file.',
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'questão1': {
+                                        'type': 'array',
+                                        'items': {
+                                            'type': 'object',
+                                            'properties': {
+                                                'pergunta': {
+                                                    'type': 'string',
+                                                    'example': 'Qual a afirmação correta sobre a Primeira Lei de Newton (Princípio da Inércia)?'
+                                                },
+                                                'alternativas': {
+                                                    'type': 'array',
+                                                    'items': {
+                                                        'type': 'string',
+                                                        'example': 'Um corpo em repouso só se move se uma força externa atuar sobre ele.'
+                                                    },
+                                                    'example': [
+                                                        "Um corpo em movimento precisa de uma força contínua para manter sua velocidade.",
+                                                        "Um corpo em repouso só se move se uma força externa atuar sobre ele.",
+                                                        "Um corpo em movimento tende a parar naturalmente, mesmo sem forças externas.",
+                                                        "A velocidade de um corpo em movimento sempre aumenta com o tempo."
+                                                    ]
+                                                },
+                                                'dica': {
+                                                    'type': 'string',
+                                                    'example': 'Considere o que acontece com um objeto em movimento na ausência de forças externas.'
+                                                },
+                                                'justificativa': {
+                                                    'type': 'string',
+                                                    'example': 'A Primeira Lei de Newton diz que um corpo em repouso ou em movimento mantém seu estado, a menos que uma força externa aja sobre ele.'
+                                                },
+                                                'resposta_correta': {
+                                                    'type': 'string',
+                                                    'example': 'Um corpo em repouso só se move se uma força externa atuar sobre ele.'
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        400: {
+                            'description': 'Bad request due to specific errors.',
+                            'examples': {
+                                'No file received': {
+                                    'error': 'No file received'
+                                },
+                                " File exceeds maximum length" : {
+                                    'error ': 'File name exceeds the maximum length of 100 characters'
+                                },
+                                'Invalid format': {
+                                    'error': 'Invalid format. Supported formats: {", ".join(self.valid_formats)}'
+                                },
+                                'Suspicious file name': {
+                                    'error': 'The filename seems suspicious and contains a blocked extension: {extensions}'
+                                },
+                                'Invalid file type': {
+                                    'error': 'Invalid file type. Detected: {detected_mime_type}. Expected: {expected_mime_type}'
+                                },
+                                'Chat generation error': {
+                                    'error': 'Error during chat generation'
+                                },
+                                'Extraction error': {
+                                    'error': 'Error during text extraction from the file'
+                                }
+                            }
+                        },
+                        413: {
+                            'description': 'Payload Too Large - File size exceeds the maximum allowed limit.',
+                            'examples': {
+                                'File size exceeds 5MB': {
+                                    'error': 'File size exceeds the maximum limit of 5 MB'
+                                }
+                            }
+                        },
+                        500: {
+                            'description': 'Internal server error.',
+                            'examples': {
+                                'Processing error': {
+                                    'error': 'An error occurred while processing the request'
                                 }
                             }
                         }
