@@ -13,7 +13,7 @@ from config.prompt_config import *
 
 from flask import Flask, request, jsonify, send_file, Response
 from werkzeug.utils import secure_filename
-from typing import List, Optional
+from typing import List, Optional, Pattern, Dict, Set
 import speech_recognition as sr
 from flask_cors import CORS
 import requests
@@ -38,7 +38,7 @@ class Server:
             'pdf': 'application/pdf',
         }
 
-        self.blocked_extensions: Dict[str] = {
+        self.blocked_extensions: Set[str] = {
             '.py', '.sh', '.bat', '.cmd', '.ps1', '.exe', '.js',
             '.msi', '.vbs', '.wsf', '.jar', '.scr', '.cpl',
             '.hta', '.wsh', '.scf', '.lnk', '.reg', '.inf',
@@ -60,7 +60,7 @@ class Server:
         self.file_root_pdf: str = None
         self.file_root_audio: str = None
 
-        self.youtube_regex: str = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
+        self.youtube_regex: Pattern[str] = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
         self.max_url_length: int = 200
 
         self._register_routes()

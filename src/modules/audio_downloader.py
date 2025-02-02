@@ -11,7 +11,7 @@ class AudioDownloader:
         self.output_path: str = 'src/temp'
         os.makedirs(self.output_path, exist_ok=True)
 
-        self.ydl_opts: Dict[str, Union[str, bool, List[Dict[str, Union[str, int]]], List[str]]] = {
+        self.ydl_opts: Dict[str, Union[str, bool, List[Union[str, Dict[str, str]]]]] = {
             'format': 'bestaudio/best',
             'outtmpl': f'{self.output_path}/%(title)s ({uuid.uuid4().hex}) (Lectify)',
             'postprocessors': [{

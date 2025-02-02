@@ -15,7 +15,7 @@ class GenerativeAI:
 
         os.environ["GRPC_VERBOSITY"] = "NONE"
         
-        self.generation_config:  Dict[str, Union[int, float, str]] = {
+        self.generation_config:  Dict[str, Union[int, str]] = {
                     "temperature": 0,
                     "top_p": 1,
                     "top_k": 40,
