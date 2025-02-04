@@ -122,7 +122,8 @@ class Server:
                     
                     try:
                         response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio)
-                        merged_prompt = f'{prompt}\n{response_audio_recognition['data']}'
+                        data_value_audio_recognition = response_audio_recognition['data']
+                        merged_prompt = f'{prompt}\n{data_value_audio_recognition}'
                         print(response_audio_recognition['message'])
                         
                         try:
@@ -215,20 +216,17 @@ class Server:
                     return self.create_error_response(f'Invalid format. Supported formats: {", ".join(self.valid_formats)}', 400)
                 
                 received_file.save(self.filepath_secure)
-                
-                mime_detector = magic.Magic(mime=True)
-                expected_mime_type = self.expected_mime_types.get(file_extension)
-                detected_mime_type = mime_detector.from_file(self.filepath_secure)
 
                 for extensions in self.blocked_extensions:
                     if extensions in filename_secure:
                         return self.create_error_response(f'The filename seems suspicious and contains a blocked extension: {extensions}', 400)
-
-                if expected_mime_type == 'text/markdown' and detected_mime_type == 'text/x-script.python' and 'Lectify' in filename_secure:
-                    detected_mime_type = 'text/markdown'
                 
-                if expected_mime_type == 'text/markdown' and detected_mime_type == 'text/plain' and 'Lectify' in filename_secure:
-                    detected_mime_type = 'text/markdown'
+                mime_detector = magic.Magic(mime=True)
+                expected_mime_type = self.expected_mime_types.get(file_extension)
+                detected_mime_type = mime_detector.from_file(self.filepath_secure)
+                
+                if expected_mime_type == 'text/markdown':
+                    detected_mime_type = expected_mime_type
                 
                 if detected_mime_type != expected_mime_type:
                     return self.create_error_response(f'Invalid file type. Detected: {detected_mime_type}. Expected: {expected_mime_type}', 400)
@@ -237,7 +235,8 @@ class Server:
                     case 'md':
                         try:
                             responde_extract_text_markdown = ExtractText().extract_text_markdown(self.filepath_secure)
-                            merged_prompt_questions = f'{prompt_questions}\n{responde_extract_text_markdown['data']}'
+                            data_value_extract_text_markdown = responde_extract_text_markdown['data']
+                            merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_markdown}'
                             print(responde_extract_text_markdown['message'])
                             
                             try:
@@ -257,7 +256,8 @@ class Server:
                     case 'pdf':
                         try:
                             responde_extract_text_pdf = ExtractText().extract_text_pdf(self.filepath_secure)
-                            merged_prompt_questions = f'{prompt_questions}\n{responde_extract_text_pdf['data']}'
+                            data_value_extract_text_pdf = responde_extract_text_pdf['data']
+                            merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_pdf}'
                             print(responde_extract_text_pdf['message'])
                             
                             try:
@@ -280,6 +280,6 @@ class Server:
                 clean_up(self.filepath_secure)
                 self.reset_values()
 
-    def run_development(self, host: str = '0.0.0.0', port: int = 5000) -> None:
-        self.app.run(debug=True, host=host, port=port, use_reloader=True)
+    def run_production(self, host: str = '0.0.0.0', port: int = 5000) -> None:
+        self.app.run(debug=False, host=host, port=port, use_reloader=False)
 

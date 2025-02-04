@@ -9,4 +9,4 @@ app = Server().app
 if __name__ == "__main__":
     welcome_message()
     server = Server()
-    server.run_development()
+    server.run_production()

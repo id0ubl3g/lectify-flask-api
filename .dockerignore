@@ -1,0 +1,19 @@
+# Byte-compiled
+
+__pycache__/
+
+# Environments
+
+.venv
+
+# Database
+
+temp/
+
+# IDE 
+
+.vscode/
+
+# Tests
+
+tests/

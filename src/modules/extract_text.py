@@ -7,18 +7,26 @@ import markdown
 
 class ExtractText:
     def extract_text_markdown(self, md_path: str) -> dict:
-        with open(md_path, 'r', encoding='utf-8') as file:
-            md_content = file.read()
+        try:
+            with open(md_path, 'r', encoding='utf-8') as file:
+                md_content = file.read()
+            
+            html_content = markdown.markdown(md_content)
+            text = BeautifulSoup(html_content, 'html.parser').get_text()
+            
+            return create_success_return_response(f'\n{GREEN}[v]{RESET} Text successfully extracted from Markdown', text)
         
-        html_content = markdown.markdown(md_content)
-        text = BeautifulSoup(html_content, 'html.parser').get_text()
-        
-        return create_success_return_response(f'\n{GREEN}[v]{RESET} Text successfully extracted from Markdown', text)
+        except KeyboardInterrupt:
+            interruption_message()
 
     def extract_text_pdf(self, pdf_path: str) -> dict:
-        with pdfplumber.open(pdf_path) as file:
-            text = ''
-            for page in file.pages:
-                text += page.extract_text()
+        try:
+            with pdfplumber.open(pdf_path) as file:
+                text = ''
+                for page in file.pages:
+                    text += page.extract_text()
 
-        return create_success_return_response(f'\n{GREEN}[v]{RESET} Text successfully extracted from PDF', text)
+            return create_success_return_response(f'\n{GREEN}[v]{RESET} Text successfully extracted from PDF', text)
+        
+        except KeyboardInterrupt:
+            interruption_message()
