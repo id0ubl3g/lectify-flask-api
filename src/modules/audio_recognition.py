@@ -13,6 +13,7 @@ class AudioRecognition:
                 audio = self.to_recognize.record(source)
 
             audio_recognized = self.to_recognize.recognize_google(audio, language="pt-BR")
+            
             return create_success_return_response(f'\n{GREEN}[v]{RESET} Audio successfully recognized', audio_recognized)
 
         except KeyboardInterrupt:
