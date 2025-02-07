@@ -2,7 +2,6 @@
 __pycache__/
 
 # Environments
-
 .venv
 .env
 
@@ -10,14 +9,12 @@ __pycache__/
 temp/
 
 # IDE 
-
 .vscode/
 
 # Ignore the test folder
 tests/
 
 # Docker 
-
 *.tar
 
 # Audio files
@@ -28,3 +25,6 @@ tests/
 
 # PDF files
 *.pdf
+
+# Cookie file
+cookies.txt
