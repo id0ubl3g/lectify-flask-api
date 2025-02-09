@@ -3,7 +3,6 @@ from src.utils.style_output import *
 
 import google.generativeai as genai
 from dotenv import load_dotenv
-from typing import Dict, Union
 import os
 
 load_dotenv()
@@ -15,7 +14,7 @@ class GenerativeAI:
 
         os.environ["GRPC_VERBOSITY"] = "NONE"
         
-        self.generation_config:  Dict[str, Union[int, str]] = {
+        self.generation_config:  dict[str, int | str] = {
                     "temperature": 0,
                     "top_p": 1,
                     "top_k": 40,

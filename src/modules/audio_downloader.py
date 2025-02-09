@@ -1,7 +1,6 @@
 from src.utils.return_responses import *
 from src.utils.style_output import *
 
-from typing import Dict, List, Union
 import yt_dlp
 import random
 import uuid
@@ -15,7 +14,7 @@ class AudioDownloader:
         throttled_rates = ['50K', '100K', '250K', '500K', '1M']
         self.chosen_rate: str = random.choice(throttled_rates)
 
-        self.ydl_opts: Dict[str, Union[str, bool, int, List[str], List[Dict[str, str]]]] = {
+        self.ydl_opts: dict[str, str | bool | int | list[str] | list[dict[str, str]]] = {
             'format': 'bestaudio/best',
             'outtmpl': f'{self.output_path}/%(title)s ({uuid.uuid4().hex}) (Lectify)',
             'postprocessors': [{
