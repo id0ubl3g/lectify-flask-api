@@ -1,5 +1,4 @@
 from src.utils.return_responses import *
-from src.utils.style_output import *
 
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -31,12 +30,7 @@ class GenerativeAI:
         )
 
     def start_chat(self, input_text: str) -> dict:
-        try:
-            chat_session = self.model.start_chat(history=[])
-            response_generative_ai = chat_session.send_message(input_text)
-            
-            return create_success_return_response(f'\n{GREEN}[v]{RESET} Successfully processed the Generative AI response', response_generative_ai.text)
+        chat_session = self.model.start_chat(history=[])
+        response_generative_ai = chat_session.send_message(input_text)
         
-        except KeyboardInterrupt:
-            interruption_message()
-
+        return create_success_return_response(f'Successfully processed the Generative AI response', response_generative_ai.text)

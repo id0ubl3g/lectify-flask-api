@@ -1,5 +1,4 @@
 from src.utils.return_responses import *
-from src.utils.style_output import *
 
 import yt_dlp
 import random
@@ -36,12 +35,8 @@ class AudioDownloader:
         }
 
     def download_audio(self, youtube_url: str) -> dict:
-        try:
-            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
-                extract = ydl.extract_info(youtube_url, download=True)  
-                audio_file_path = ydl.prepare_filename(extract).replace('.webm', '.wav')
+        with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+            extract = ydl.extract_info(youtube_url, download=True)  
+            audio_file_path = ydl.prepare_filename(extract).replace('.webm', '.wav')
 
-                return create_success_return_response(f'\n{GREEN}[v]{RESET} Sucessfully downloaded', audio_file_path + '.wav')
-        
-        except KeyboardInterrupt:
-            interruption_message()
+            return create_success_return_response('Sucessfully downloaded', audio_file_path + '.wav')

@@ -109,7 +109,6 @@ class Server:
                 
                 try:
                     response_audio_downloader = AudioDownloader().download_audio(self.youtube_url)
-                    print(response_audio_downloader['message'])
                     
                     relative_path_audio = response_audio_downloader['data']
                     relative_path_markdown = f'{relative_path_audio.replace(".wav", "")}.md'
@@ -123,19 +122,15 @@ class Server:
                         response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio)
                         data_value_audio_recognition = response_audio_recognition['data']
                         merged_prompt = f'{prompt}\n{data_value_audio_recognition}'
-                        print(response_audio_recognition['message'])
                         
                         try:
                             response_generative_ai = GenerativeAI().start_chat(merged_prompt)
-                            print(response_generative_ai['message'])
                             
                             try:
-                                response_document_builder = DocumentBuilder().build_document(response_generative_ai['data'], relative_path_markdown)
-                                print(response_document_builder['message'])
+                                DocumentBuilder().build_document(response_generative_ai['data'], relative_path_markdown)
                                 
                                 try:
-                                    response_convert_document = ConvertDocument().markdown_to_pdf(relative_path_markdown, relative_path_pdf)
-                                    print(response_convert_document['message'])
+                                    ConvertDocument().markdown_to_pdf(relative_path_markdown, relative_path_pdf)
 
                                     match self.output_format:
                                         case 'md':
@@ -236,11 +231,9 @@ class Server:
                             responde_extract_text_markdown = ExtractText().extract_text_markdown(self.filepath_secure)
                             data_value_extract_text_markdown = responde_extract_text_markdown['data']
                             merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_markdown}'
-                            print(responde_extract_text_markdown['message'])
                             
                             try:
                                 response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
-                                print(response_generative_ai['message'])
 
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
                                 
@@ -257,11 +250,9 @@ class Server:
                             responde_extract_text_pdf = ExtractText().extract_text_pdf(self.filepath_secure)
                             data_value_extract_text_pdf = responde_extract_text_pdf['data']
                             merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_pdf}'
-                            print(responde_extract_text_pdf['message'])
                             
                             try:
                                 response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
-                                print(response_generative_ai['message'])
 
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
                                 return jsonify(response_generative_ai_json), 200
