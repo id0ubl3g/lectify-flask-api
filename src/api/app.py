@@ -12,7 +12,6 @@ from src.utils.system_utils import *
 from config.prompt_config import *
 
 from flask import Flask, request, jsonify, send_file, Response
-from typing import List, Optional, Pattern, Dict, Set
 from werkzeug.utils import secure_filename
 import speech_recognition as sr
 from flask_cors import CORS
@@ -27,18 +26,18 @@ class Server:
         self.app: Flask = Flask(__name__)
         CORS(self.app)
         
-        self.youtube_url: Optional[str] = None
-        self.output_format: Optional[str] = None
+        self.youtube_url: str = None
+        self.output_format: str = None
 
-        self.required_fields: List['str'] = ['youtube_url', 'output_format']
-        self.valid_formats: List['str'] = ['pdf', 'md']
+        self.required_fields: list['str'] = ['youtube_url', 'output_format']
+        self.valid_formats: list['str'] = ['pdf', 'md']
 
-        self.expected_mime_types: Dict[str, str] = {
+        self.expected_mime_types: dict[str, str] = {
             'md': 'text/markdown',
             'pdf': 'application/pdf',
         }
 
-        self.blocked_extensions: Set[str] = {
+        self.blocked_extensions: frozenset[str] = frozenset({
             '.py', '.sh', '.bat', '.cmd', '.ps1', '.exe', '.js',
             '.msi', '.vbs', '.wsf', '.jar', '.scr', '.cpl',
             '.hta', '.wsh', '.scf', '.lnk', '.reg', '.inf',
@@ -51,7 +50,7 @@ class Server:
             '.dll', '.drv', '.vxd', '.sys',
             '.bak', '.old', '.swp',
             '.chm', '.mdb', '.sql', '.db'
-        }
+        })
 
         self.output_path: str = 'src/temp'
         self.filepath_secure: str = None
@@ -60,15 +59,15 @@ class Server:
         self.file_root_pdf: str = None
         self.file_root_audio: str = None
 
-        self.youtube_regex: Pattern[str] = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
+        self.youtube_regex = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
         self.max_url_length: int = 200
 
         self._register_routes()
         init_flasgger(self.app)
     
     def reset_values(self) -> None:
-        self.youtube_url: Optional[str] = None
-        self.output_format: Optional[str] = None
+        self.youtube_url: str = None
+        self.output_format: str = None
 
         self.file_root_markdown: str = None
         self.file_root_pdf: str = None
