@@ -5,11 +5,11 @@ from src.modules.document_builder import DocumentBuilder
 from src.modules.convert_document import ConvertDocument
 from src.modules.extract_text import ExtractText
 
+from config.prompt_config import prompt_questions, prompt
+
+from src.utils.system_utils import clean_up
+
 from docs.flasgger import init_flasgger
-
-from src.utils.system_utils import *
-
-from config.prompt_config import *
 
 from flask import Flask, request, jsonify, send_file, Response
 from werkzeug.utils import secure_filename
@@ -19,6 +19,7 @@ import requests
 import yt_dlp
 import magic
 import json
+import os
 import re
 
 class Server:

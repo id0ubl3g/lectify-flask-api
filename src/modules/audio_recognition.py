@@ -1,4 +1,4 @@
-from src.utils.return_responses import *
+from src.utils.return_responses import create_success_return_response
 
 import speech_recognition as sr
 

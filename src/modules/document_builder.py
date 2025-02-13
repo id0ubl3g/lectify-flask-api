@@ -1,4 +1,4 @@
-from src.utils.return_responses import *
+from src.utils.return_responses import create_success_return_response
 
 class DocumentBuilder:
     def build_document(self, data_generative_ai: str, document_output_path: str) -> dict:
