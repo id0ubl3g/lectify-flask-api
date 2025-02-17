@@ -33,9 +33,14 @@ def init_flasgger(app: Flask) -> None:
                                         'type': 'string',
                                         'description': 'Desired output format (md or pdf).',
                                         'example': 'pdf'
+                                    },
+                                    'language_select': {
+                                        'type': 'string',
+                                        'description': 'Desired language for summarization (pt-BR or en-US).',
+                                        'example': 'pt-BR'
                                     }
                                 },
-                                'required': ['youtube_url', 'output_format']
+                                'required': ['youtube_url', 'output_format', 'language_select']
                             }
                         }
                     ],
@@ -67,6 +72,12 @@ def init_flasgger(app: Flask) -> None:
                                 },
                                 'Unsupported format': {
                                     'error': 'Invalid format. Supported formats: {", ".join(self.valid_formats)}'
+                                },
+                                'Missing language selection': {
+                                    'error': 'Missing language selection'
+                                },
+                                'Invalid language': {
+                                    'error': 'Invalid format. Supported formats: {", ".join(self.valid_languages_formats)}'
                                 },
                                 'File not found': {
                                     'error': 'File not found'

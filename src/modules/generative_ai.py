@@ -13,9 +13,9 @@ class GenerativeAI:
 
         os.environ["GRPC_VERBOSITY"] = "NONE"
         
-        self.generation_config:  dict[str, int | str] = {
-                    "temperature": 0,
-                    "top_p": 1,
+        self.generation_config:  dict[str, float | int | str] = {
+                    "temperature": 0.2,
+                    "top_p": 0.9,
                     "top_k": 40,
                     "max_output_tokens": 1024,
                     "response_mime_type": "text/plain",

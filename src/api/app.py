@@ -5,7 +5,7 @@ from src.modules.document_builder import DocumentBuilder
 from src.modules.convert_document import ConvertDocument
 from src.modules.extract_text import ExtractText
 
-from config.prompt_config import prompt_questions, prompt
+from config.prompt_config import prompt_ptBR, prompt_enUS, prompt_questions
 
 from src.utils.system_utils import clean_up
 
@@ -29,9 +29,11 @@ class Server:
         
         self.youtube_url: str = None
         self.output_format: str = None
+        self.language_select: str = None
 
-        self.required_fields: list['str'] = ['youtube_url', 'output_format']
+        self.required_fields: list['str'] = ['youtube_url', 'output_format', 'language_select']
         self.valid_formats: list['str'] = ['pdf', 'md']
+        self.valid_languages_formats: list['str'] = ['pt-BR', 'en-US']
 
         self.expected_mime_types: dict[str, str] = {
             'md': 'text/markdown',
@@ -63,18 +65,23 @@ class Server:
         self.youtube_regex = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
         self.max_url_length: int = 200
 
+        self.prompt: str = None
+
         self._register_routes()
         init_flasgger(self.app)
     
     def reset_values(self) -> None:
         self.youtube_url: str = None
         self.output_format: str = None
+        self.language_select: str = None
 
         self.file_root_markdown: str = None
         self.file_root_pdf: str = None
         self.file_root_audio: str = None
 
         self.filepath_secure: str = None
+
+        self.prompt: str = None
 
     def create_error_response(self, message: str, code: int) -> Response:
         return jsonify({'error': message}), code
@@ -95,7 +102,8 @@ class Server:
                 
                 self.youtube_url = data.get('youtube_url')
                 self.output_format = data.get('output_format')
-
+                self.language_select = data.get('language_select')
+                
                 if not self.youtube_url:
                     return self.create_error_response('Missing YouTube URL', 400)
                 
@@ -108,6 +116,19 @@ class Server:
                 if self.output_format not in self.valid_formats:
                     return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_formats)}", 400)
                 
+                if not self.language_select:
+                    return self.create_error_response('Missing language selection', 400)
+                
+                if self.language_select not in self.valid_languages_formats:
+                    return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_languages_formats)}", 400)
+
+                match self.language_select:
+                    case 'pt-BR':
+                        self.prompt = prompt_ptBR
+                        
+                    case 'en-US':
+                        self.prompt = prompt_enUS
+
                 try:
                     response_audio_downloader = AudioDownloader().download_audio(self.youtube_url)
                     
@@ -120,9 +141,9 @@ class Server:
                     self.file_root_pdf = os.path.abspath(relative_path_pdf)
                     
                     try:
-                        response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio)
+                        response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio, self.language_select)
                         data_value_audio_recognition = response_audio_recognition['data']
-                        merged_prompt = f'{prompt}\n{data_value_audio_recognition}'
+                        merged_prompt = f'{self.prompt}\n{data_value_audio_recognition}'
                         
                         try:
                             response_generative_ai = GenerativeAI().start_chat(merged_prompt)
