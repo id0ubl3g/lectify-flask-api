@@ -190,7 +190,7 @@ def init_flasgger(app: Flask) -> None:
                                 'No file received': {
                                     'error': 'No file received'
                                 },
-                                " File exceeds maximum length" : {
+                                "File exceeds maximum length": {
                                     'error ': 'File name exceeds the maximum length of 100 characters'
                                 },
                                 'Invalid format': {

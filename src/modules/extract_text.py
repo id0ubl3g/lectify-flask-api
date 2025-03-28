@@ -13,7 +13,6 @@ class ExtractText:
         text = BeautifulSoup(html_content, 'html.parser').get_text()
         
         return create_success_return_response(f'Text successfully extracted from Markdown', text)
-    
 
     def extract_text_pdf(self, pdf_path: str) -> dict:
         with pdfplumber.open(pdf_path) as file:

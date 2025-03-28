@@ -37,7 +37,7 @@ class Server:
 
         self.expected_mime_types: dict[str, str] = {
             'md': 'text/markdown',
-            'pdf': 'application/pdf',
+            'pdf': 'application/pdf'
         }
 
         self.blocked_extensions: frozenset[str] = frozenset({
@@ -250,8 +250,8 @@ class Server:
                 match file_extension:
                     case 'md':
                         try:
-                            responde_extract_text_markdown = ExtractText().extract_text_markdown(self.filepath_secure)
-                            data_value_extract_text_markdown = responde_extract_text_markdown['data']
+                            response_extract_text_markdown = ExtractText().extract_text_markdown(self.filepath_secure)
+                            data_value_extract_text_markdown = response_extract_text_markdown['data']
                             merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_markdown}'
                             
                             try:
@@ -269,8 +269,8 @@ class Server:
 
                     case 'pdf':
                         try:
-                            responde_extract_text_pdf = ExtractText().extract_text_pdf(self.filepath_secure)
-                            data_value_extract_text_pdf = responde_extract_text_pdf['data']
+                            response_extract_text_pdf = ExtractText().extract_text_pdf(self.filepath_secure)
+                            data_value_extract_text_pdf = response_extract_text_pdf['data']
                             merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_pdf}'
                             
                             try:

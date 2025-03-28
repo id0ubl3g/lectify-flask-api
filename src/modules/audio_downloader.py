@@ -10,9 +10,6 @@ class AudioDownloader:
         self.output_path: str = 'src/temp'
         os.makedirs(self.output_path, exist_ok=True)
 
-        throttled_rates = ['50K', '100K', '250K', '500K', '1M']
-        self.chosen_rate: str = random.choice(throttled_rates)
-
         self.ydl_opts: dict[str, str | bool | int | list[str] | list[dict[str, str]]] = {
             'format': 'bestaudio/best',
             'outtmpl': f'{self.output_path}/%(title)s ({uuid.uuid4().hex}) (Lectify)',
@@ -28,10 +25,8 @@ class AudioDownloader:
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'cookiefile': 'src/temp/cookies.txt',
             'sleep_interval': random.randint(5, 10),
-            'max_sleep_interval': random.randint(10, 20),
-            'throttled_rate': self.chosen_rate
+            'max_sleep_interval': random.randint(10, 20)
         }
 
     def download_audio(self, youtube_url: str) -> dict:
