@@ -82,7 +82,7 @@ As questões devem ser organizadas em um objeto JSON com 5 propriedades, uma par
 
 ### Importante:
 1. Forneça apenas as 5 questões no formato JSON especificado. Não adicione explicações extras ou formatação adicional.
-2. Se o texto fornecido estiver em inglês, as perguntas devem ser geradas em inglês.
+2. Se o texto fornecido estiver em inglês, as perguntas, alternativas, respostas, dicas e justificativas devem ser geradas em inglês, mas as chaves do JSON devem permanecer em português.
 3. Certifique-se de não incluir a marcação de código (como ```json```) ao formatar as questões em JSON.
 
 ### Trecho para trabalhar:
