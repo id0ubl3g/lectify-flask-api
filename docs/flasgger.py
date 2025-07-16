@@ -52,6 +52,14 @@ def init_flasgger(app: Flask) -> None:
                                 'example': 'Generated document in the requested format.'
                             }
                         },
+                        429: {
+                            'description': 'Server busy',
+                            'examples': {
+                                'Server busy': {
+                                    'error': 'Server busy. Please try again shortly.'
+                            }
+                        }
+                    },
                         400: {
                             'description': 'Bad request due to specific errors.',
                             'examples': {
@@ -181,6 +189,14 @@ def init_flasgger(app: Flask) -> None:
                                             }
                                         }
                                     }
+                                }
+                            }
+                        },
+                        429: {
+                            'description': 'Server busy',
+                            'examples': {
+                                'Server busy': {
+                                    'error': 'Server busy. Please try again shortly.'
                                 }
                             }
                         },

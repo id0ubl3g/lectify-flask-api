@@ -15,6 +15,7 @@ from flask import Flask, request, jsonify, send_file, Response
 from werkzeug.utils import secure_filename
 import speech_recognition as sr
 from flask_cors import CORS
+from threading import Lock
 import requests
 import yt_dlp
 import magic
@@ -25,6 +26,7 @@ import re
 class Server:
     def __init__(self) -> None:
         self.app: Flask = Flask(__name__)
+        self.processing_lock = Lock()
         CORS(self.app)
         
         self.youtube_url: str = None
@@ -89,6 +91,9 @@ class Server:
     def _register_routes(self) -> None:
         @self.app.route('/lectify/summarize', methods=['POST'])
         def lectify_summarize() -> Response:
+            if not self.processing_lock.acquire(blocking=False):
+                return self.create_error_response("Server busy. Please try again shortly", 429)
+            
             try:
                 data = request.get_json()
                 
@@ -200,9 +205,13 @@ class Server:
             finally:
                 clean_up(self.file_root_markdown, self.file_root_pdf, self.file_root_audio)
                 self.reset_values()
+                self.processing_lock.release()
         
         @self.app.route('/lectify/questions', methods=['POST'])
         def lectify_questions() -> Response:
+            if not self.processing_lock.acquire(blocking=False):
+                return self.create_error_response("Server busy. Please try again shortly", 429)
+            
             try:
                 received_file = request.files['file']
 
@@ -291,6 +300,7 @@ class Server:
             finally:
                 clean_up(self.filepath_secure)
                 self.reset_values()
+                self.processing_lock.release()
 
     def run_production(self, host: str = '0.0.0.0', port: int = 5000) -> None:
         self.app.run(debug=False, host=host, port=port, use_reloader=False)
