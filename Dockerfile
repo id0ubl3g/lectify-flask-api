@@ -16,4 +16,4 @@ RUN .venv/bin/pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 5000
 
-CMD [".venv/bin/python", "run.py"]
+CMD [".venv/bin/gunicorn", "-w", "1", "-k", "gthread", "--threads", "1", "-b", "0.0.0.0:5000", "run:app"]
