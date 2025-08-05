@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  lectify-flask-api:
+    container_name: lectify-flask-api
+    build: .
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - lectify-net
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - lectify-net
+
+networks:
+  lectify-net:
+    name: lectify-flask-api

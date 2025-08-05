@@ -4,6 +4,10 @@ __pycache__/
 # Environments
 .venv
 
+# Database
+temp/
+dump.rdb
+
 # IDE 
 .vscode/
 
