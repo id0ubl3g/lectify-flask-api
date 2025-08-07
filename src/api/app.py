@@ -52,13 +52,9 @@ class Server:
         client = MongoClient(os.getenv('mongodb_key'))
         db = client['lectify-flask-api']
         
-        self.check_email_register_collection: Collection = db["check_email_register"]
-        self.check_email_register_collection.create_index("timestamp", expireAfterSeconds=600)
-        self.check_email_register_collection.create_index("email", unique=True)
-
-        self.check_email_reset_password_collection: Collection = db["check_email_reset_password"]
-        self.check_email_reset_password_collection.create_index("timestamp", expireAfterSeconds=600)
-        self.check_email_reset_password_collection.create_index("email", unique=True)
+        self.check_email_collection: Collection = db["check_email"]
+        self.check_email_collection.create_index("timestamp", expireAfterSeconds=600)
+        self.check_email_collection.create_index("email", unique=True)
         
         self.users_collection: Collection = db['users']
         self.users_collection.create_index("email", unique=True)
@@ -429,10 +425,11 @@ class Server:
                 
                 code = self.generate_code()
                 
-                self.check_email_register_collection.update_one({
+                self.check_email_collection.update_one({
                     "email":email},
                     {
                         "$set": {
+                            "type_verification": "register",
                             "is_verified": False,
                             "code": code,
                             "timestamp": datetime.datetime.utcnow()
@@ -469,10 +466,13 @@ class Server:
                 if not is_valid_email(email):
                     return self.create_error_response("Invalid email format", 400)
                 
-                check_email_data = self.check_email_register_collection.find_one({"email": email})
+                check_email_data = self.check_email_collection.find_one({"email": email})
 
                 if not check_email_data:
                     return self.create_error_response("Email not found", 404)
+                
+                if check_email_data['type_verification'] != 'register':
+                    return self.create_error_response("Invalid verification type", 400)
                 
                 validation_error = validate_user_data({
                     "code": code
@@ -484,7 +484,7 @@ class Server:
                 if check_email_data['code'] != code:
                     return self.create_error_response("Invalid verification code", 400)
                 
-                self.check_email_register_collection.update_one(
+                self.check_email_collection.update_one(
                     {"email": email},
                     {"$set": {"is_verified": True}})
 
@@ -541,10 +541,13 @@ class Server:
                     "email": email,
                     "firstname": firstname,
                     "lastname": lastname,
-                    "is_free": True
+                    "is_free": True,
+                    "created_at": datetime.datetime.utcnow()
                 }
 
                 self.users_collection.insert_one(user_data)
+
+                self.check_email_collection.delete_one({"email": email})
 
                 return jsonify({"message": "User registered successfully"}), 201
             
@@ -752,10 +755,11 @@ class Server:
                 
                 code = self.generate_code()
                 
-                self.check_email_reset_password_collection.update_one({
+                self.check_email_collection.update_one({
                     "email": email},
                     {
                         "$set": {
+                            "type_verification": "reset_password",
                             "is_verified": False,
                             "code": code,
                             "timestamp": datetime.datetime.utcnow()
@@ -798,7 +802,7 @@ class Server:
                 if validation_error:
                     return self.create_error_response(validation_error, 400)
                 
-                check_email_data = self.check_email_reset_password_collection.find_one({"email": email})
+                check_email_data = self.check_email_collection.find_one({"email": email})
 
                 if not check_email_data:
                     return self.create_error_response("Email not found", 404)
@@ -806,12 +810,15 @@ class Server:
                 if check_email_data['code'] != code:
                     return self.create_error_response("Invalid verification code", 400)
                 
+                if check_email_data['type_verification'] != 'reset_password':
+                    return self.create_error_response("Invalid verification type", 400)
+                
                 hashed_password = generate_password_hash(new_password)
                 self.users_collection.update_one(
                     {"email": email},
                     {"$set": {"password": hashed_password}})
 
-                self.check_email_reset_password_collection.delete_one({"email": email})
+                self.check_email_collection.delete_one({"email": email})
 
                 return jsonify({"message": "Password reset successfully"}), 200
             

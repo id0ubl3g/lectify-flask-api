@@ -15,8 +15,7 @@ class AudioDownloader:
             'outtmpl': f'{self.output_path}/%(title)s ({uuid.uuid4().hex}) (Lectify)',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'wav',
-                'preferredquality': '192'
+                'preferredcodec': 'wav'
             }],
             'postprocessor_args': [
                 '-ss', '00:00:00',  

@@ -108,8 +108,8 @@ Ensure a browser is installed in the environment and the user is logged in to av
 ## Build and Run Container
 
 ```sh
-docker build -t conver-flask-api .
-docker run -p 5000:5000 conver-flask-api
+docker build -t lectify-flask-api .
+docker run -p 5000:5000 lectify-flask-api
 ```
 
 ## API Documentation
