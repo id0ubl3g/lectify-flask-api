@@ -1,8 +1,11 @@
 from src.utils.return_responses import create_success_return_response
 
+from config.headers_config import user_agents, accept_languages
+
 import yt_dlp
 import random
 import uuid
+import time
 import os
 
 class AudioDownloader:
@@ -15,22 +18,56 @@ class AudioDownloader:
             'outtmpl': f'{self.output_path}/%(title)s ({uuid.uuid4().hex}) (Lectify)',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'wav'
+                'preferredcodec': 'mp3',
+                'preferredquality': '0'
             }],
             'postprocessor_args': [
-                '-ss', '00:00:00',  
+                '-ar', '16000',
+                '-ac', '1',
+                '-ss', '00:00:00',
                 '-t', '00:01:30'
             ],
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'sleep_interval': random.randint(5, 10),
-            'max_sleep_interval': random.randint(10, 20)
+            "sleep_requests": True,
+            "fragment_retries": 3
         }
 
-    def download_audio(self, youtube_url: str) -> dict:
-        with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
-            extract = ydl.extract_info(youtube_url, download=True)  
-            audio_file_path = ydl.prepare_filename(extract).replace('.webm', '.wav')
+    def download_audio(self, youtube_url: str, user_is_free: bool = True) -> dict:
+        time.sleep(random.uniform(1.5, 5.5))
+        ydl_opts = self.ydl_opts.copy()
 
-            return create_success_return_response('Sucessfully downloaded', audio_file_path + '.wav')
+        if user_is_free:
+            ydl_opts['ratelimit'] = random.randint(150_000, 500_000)
+            ydl_opts['sleep_interval'] = random.uniform(3.0, 8.0)
+            ydl_opts['max_sleep_interval'] = random.uniform(6.0, 16.0)
+            ydl_opts['concurrent_fragment_downloads'] = 1
+            ydl_opts['retries'] = 2
+        
+        else:
+            ydl_opts['ratelimit'] = random.randint(3_000_000, 5_000_000)
+            ydl_opts['sleep_interval'] = random.uniform(2.0, 5.0)
+            ydl_opts['max_sleep_interval'] = random.uniform(4.0, 10.0)
+            ydl_opts['concurrent_fragment_downloads'] = 6
+            ydl_opts['retries'] = 4
+
+        ydl_opts['http_headers'] = {
+            'User-Agent': random.choice(user_agents), 
+            "Accept-Language": random.choice(accept_languages),
+            "Referer": "https://www.youtube.com/",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1"
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            extract = ydl.extract_info(youtube_url, download=True)  
+            audio_file_path = ydl.prepare_filename(extract).replace('.webm', '.mp3')
+
+            return create_success_return_response('Sucessfully downloaded', f'{audio_file_path}.mp3')

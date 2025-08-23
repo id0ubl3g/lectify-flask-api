@@ -23,14 +23,15 @@ from pymongo import MongoClient
 
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
-import speech_recognition as sr
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from threading import Lock
+from redis import Redis
 import requests
-import datetime
 import yt_dlp
 import string
 import random
+import stripe
 import magic
 import json
 import os
@@ -43,10 +44,24 @@ class Server:
         self.app: Flask = Flask(__name__)
 
         self.app.config['JWT_SECRET_KEY'] = os.getenv('jwt_secret_key')
-        self.app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(minutes=15)
-        self.app.config['JWT_REFRESH_TOKEN_EXPIRES'] = datetime.timedelta(days=30)
+        self.app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=15)
+        self.app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
         self.app.config['RATELIMIT_STORAGE_URI'] = os.getenv("redis://localhost:6379")
 
+        stripe.api_key = os.getenv('stripe_api_key')
+        self.stripe_webhook_secret = os.getenv('stripe_webhook_secret')
+
+        self.plans: dict[str, str] = {
+            "1_month": os.getenv('stripe_price_1_month'),
+            "6_months": os.getenv('stripe_price_6_months'),
+            "1_year": os.getenv('stripe_price_1_year')
+        }
+
+        self.durations: dict[str, timedelta] = {
+            "1_month": timedelta(days=30),
+            "6_months": timedelta(days=180),
+            "1_year": timedelta(days=365)
+        }
 
         self.jwt: JWTManager = JWTManager(self.app)
         client = MongoClient(os.getenv('mongodb_key'))
@@ -60,16 +75,24 @@ class Server:
         self.users_collection.create_index("email", unique=True)
         self.users_collection.create_index("username", unique=True)
 
+        redis_url: str = os.getenv("redis_url")
+        self.redis_client = Redis.from_url(redis_url)
         self.limiter: Limiter = Limiter(
             key_func=self.user_or_ip,
             app=self.app,
             default_limits=["100 per minute"],
-            storage_uri=os.getenv("redis://localhost:6379")
+            storage_uri=redis_url
         )
 
         self.processing_lock = Lock()
-        CORS(self.app)
         
+        CORS(
+            self.app,
+            origins=["https://lectify.vercel.app"],
+            allow_headers=["Content-Type", "Authorization"],
+            methods=["GET", "POST", "PATCH", "DELETE"]
+        )
+                
         self.youtube_url: str = None
         self.output_format: str = None
         self.language_select: str = None
@@ -141,12 +164,27 @@ class Server:
             "is_verified": True}) is not None
     
     def user_is_free(self, username: str) -> bool:
-        user = self.get_user(username)
-        return user.get('is_free', True) if user else True
+        current_user = self.get_user(username)
+
+        if not current_user:
+            return True
+        
+        subscription_end = current_user.get('subscription_end', None)
+        
+        if subscription_end and datetime.utcnow() < subscription_end:
+            if current_user.get('is_free', True):
+                self.users_collection.update_one({"username": username}, {"$set": {"is_free": False}})
+            
+            return False
+                    
+        if not current_user.get('is_free', True):
+            self.users_collection.update_one({"username": username}, {"$set": {"is_free": True}})
+        
+        return True
 
     def dynamic_limit(self) -> str | None:
         username = get_jwt_identity()
-        return "1 per day" if self.user_is_free(username) else None
+        return "5 per 30 days" if self.user_is_free(username) else None
     
     def user_or_ip(self) -> str:
             try:
@@ -159,40 +197,88 @@ class Server:
                 pass
             
             return get_remote_address()
+    
+    def check_and_apply_block(self, current_user: str, increment: bool = True) -> Response | None:
+        block_key = f"blocked:{current_user}"
+        count_key = f"count429:{current_user}"
+
+        if self.redis_client.exists(block_key):
+            ttl = self.redis_client.ttl(block_key)
+            minutes = max(1, ttl // 60)
+            return self.create_error_response(f"You have been temporarily blocked due to repeated rate limit violations. Please try again in {minutes} minute(s).", 429)
+        
+        count =  None
+        
+        if increment:
+            pipe = self.redis_client.pipeline()
+            pipe.incr(count_key)
+            pipe.expire(count_key, 300)
+            count, _ = pipe.execute()
+
+        if increment and count == 3:
+            return self.create_error_response("You are approaching the rate limit. One more failed attempt will block you for 30 minutes. Please try again later.", 429)
+
+        if increment and count and count > 3:
+            self.redis_client.set(block_key, 1, ex=1800)
+            self.redis_client.delete(count_key)
+            
+            return self.create_error_response("You have been temporarily blocked due to repeated rate limit violations.", 429)
+        
+        return None
 
     def create_error_response(self, message: str, code: int) -> Response:
         return jsonify({'error': message}), code
 
     def _register_routes(self) -> None:
-        @self.app.route('/lectify/current_plan', methods=['GET'])
-        @jwt_required()
-        def current_plan() -> Response:
-            username = get_jwt_identity()
-            is_free = self.user_is_free(username)
-            plan = "free" if is_free else "premium"
-            
-            return jsonify({"username": username, "plan": plan})
-        
         @self.app.errorhandler(429)
         def ratelimit_error(e) -> Response:
+            current_user = self.user_or_ip()
+            response_check_and_apply_block = self.check_and_apply_block(current_user)
+
+            if response_check_and_apply_block:
+                return response_check_and_apply_block
+
             endpoint = request.endpoint
-            if endpoint == 'lectify_summarize' or endpoint == 'lectify_questions':
-                return self.create_error_response("Daily limit of 5 requests reached.", 429)
+            if endpoint in ('lectify_summarize', 'lectify_questions') and self.user_is_free(current_user):
+                return self.create_error_response("Monthly limit exceeded or you are making too many requests. Please try again later.", 429)
 
             return self.create_error_response("Too many requests. Please try again later.", 429)
-                
+        
+        @self.app.after_request
+        def after_request(response) -> Response:
+            endpoint = request.endpoint
+            if endpoint == 'lectify_summarize':
+                clean_up(self.file_root_markdown, self.file_root_pdf, self.file_root_audio)
+                self.reset_values()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
+
+            if endpoint == 'lectify_questions':
+                clean_up(self.filepath_secure)
+                self.reset_values()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
+            
+            return response
+
         @self.app.route('/lectify/summarize', methods=['POST'])
         @jwt_required()
         @self.limiter.limit(lambda: self.dynamic_limit())
+        @self.limiter.limit("5 per minute")
         def lectify_summarize() -> Response:
-            current_user = get_jwt_identity()
-            if not current_user:
-                return self.create_error_response("Unauthorized", 401)
-            
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                            
+                if not current_user:
+                    return self.create_error_response("Unauthorized", 401)
+
                 data = request.get_json()
                 
                 if not data:
@@ -233,7 +319,7 @@ class Server:
                         self.prompt = prompt_enUS
 
                 try:
-                    response_audio_downloader = AudioDownloader().download_audio(self.youtube_url)
+                    response_audio_downloader = AudioDownloader().download_audio(self.youtube_url, lambda: self.user_is_free())
                     
                     relative_path_audio = response_audio_downloader['data']
                     relative_path_markdown = f'{relative_path_audio.replace(".wav", "")}.md'
@@ -279,12 +365,6 @@ class Server:
                         except Exception:
                             return self.create_error_response("Error during chat generation", 400)
                     
-                    except sr.UnknownValueError:
-                        return self.create_error_response('Unable to understand the audio', 400)
-            
-                    except sr.RequestError:
-                        return self.create_error_response('Error in service request', 400)
-                    
                     except Exception:
                         return self.create_error_response('Error during audio recognition', 400)
 
@@ -299,25 +379,25 @@ class Server:
 
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-
-            finally:
-                clean_up(self.file_root_markdown, self.file_root_pdf, self.file_root_audio)
-                self.reset_values()
-                self.processing_lock.release()
         
         @self.app.route('/lectify/questions', methods=['POST'])
         @jwt_required()
         @self.limiter.limit(lambda: self.dynamic_limit())
+        @self.limiter.limit("5 per minute")
         def lectify_questions() -> Response:
-            current_user = get_jwt_identity()
-            
-            if not current_user:
-                return self.create_error_response("Unauthorized", 401)
-            
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                            
+                if not current_user:
+                    return self.create_error_response("Unauthorized", 401)
+            
                 received_file = request.files['file']
 
                 if not received_file:
@@ -394,26 +474,27 @@ class Server:
                                 return jsonify(response_generative_ai_json), 200
 
                             except Exception:
-                                return self.create_error_response("Error during chat generation", 400)
+                                return self.create_error_response(f"Error during chat generation", 400)
 
                         except Exception:
-                            return self.create_error_response('Error during extraction of PDF text', 400)
+                            return self.create_error_response(f'Error during extraction of PDF text', 400)
             
             except Exception:
-                return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                clean_up(self.filepath_secure)
-                self.reset_values()
-                self.processing_lock.release()
+                return self.create_error_response(f'An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/check_email_register', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_check_email_register() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                
                 data = request.get_json()
                 email = data.get("email").lower().strip()
 
@@ -432,7 +513,7 @@ class Server:
                             "type_verification": "register",
                             "is_verified": False,
                             "code": code,
-                            "timestamp": datetime.datetime.utcnow()
+                            "timestamp": datetime.utcnow()
                         }
                     },
                     upsert=True
@@ -451,10 +532,16 @@ class Server:
         @self.app.route('/lectify/verify_email_register', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_verify_email_register() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                
                 data = request.get_json()
 
                 email = data.get("email").lower().strip()
@@ -499,10 +586,16 @@ class Server:
         @self.app.route('/lectify/register', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_register() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                            
                 data = request.get_json()
 
                 username = data.get("username").lower().strip()
@@ -542,7 +635,7 @@ class Server:
                     "firstname": firstname,
                     "lastname": lastname,
                     "is_free": True,
-                    "created_at": datetime.datetime.utcnow()
+                    "created_at": datetime.utcnow()
                 }
 
                 self.users_collection.insert_one(user_data)
@@ -560,10 +653,16 @@ class Server:
         @self.app.route('/lectify/login', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_login() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                
                 data = request.get_json()
 
                 username = data.get("username").lower().strip()
@@ -602,22 +701,33 @@ class Server:
         @self.app.route('/lectify/profile', methods=['GET'])
         @jwt_required()        
         def lectify_profile() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
-                current_username = get_jwt_identity()
-                current_user = self.get_user(current_username)
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
                 
-                if not current_user:
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                
+                user_is_free = self.user_is_free(current_user)
+                current_info_user = self.get_user(current_user)
+                
+                if not current_info_user:
                     return self.create_error_response("User not found", 404)
-                
+                                
                 profile_data = {
-                    "username": current_user['username'],
-                    "email": current_user['email'],
-                    "firstname": current_user['firstname'],
-                    "lastname": current_user['lastname']
+                    "username": current_info_user['username'],
+                    "email": current_info_user['email'],
+                    "firstname": current_info_user['firstname'],
+                    "lastname": current_info_user['lastname'],
+                    "is_free": current_info_user['is_free']
                 }
+
+                if not user_is_free:
+                    profile_data["plan"] = current_info_user.get('plan', None)
+                    profile_data["subscription_end"] = current_info_user.get('subscription_end', None)
 
                 return jsonify(profile_data), 200
             
@@ -631,12 +741,16 @@ class Server:
         @jwt_required(refresh=True)
         @self.limiter.limit("5 per minute")
         def lectify_refresh_token() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
-                current_user = get_jwt_identity()
-
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                                
                 if not self.get_user(current_user):
                     return self.create_error_response("User not found", 404)
                 
@@ -652,18 +766,23 @@ class Server:
             finally:
                 self.processing_lock.release()
         
-        @self.app.route('/lectify/update_profile', methods=['POST'])
+        @self.app.route('/lectify/update_profile', methods=['PATCH'])
         @jwt_required()
         @self.limiter.limit("5 per minute")
         def lectify_update_profile() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
-                current_username = get_jwt_identity()
-                current_user = self.get_user(current_username)
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
                 
-                if not current_user:
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                            
+                current_info_user = self.get_user(current_user)
+                
+                if not current_info_user:
                     return self.create_error_response("User not found", 404)
                 
                 data = request.get_json()
@@ -703,7 +822,7 @@ class Server:
                 if "password" in data:
                     update_fields['password'] = generate_password_hash(new_password)
                 
-                self.users_collection.update_one({"username": current_username}, {"$set": update_fields})
+                self.users_collection.update_one({"username": current_user}, {"$set": update_fields})
                 
                 return jsonify({"message": "Profile updated successfully"}), 200
             
@@ -717,17 +836,22 @@ class Server:
         @jwt_required()
         @self.limiter.limit("1 per minute")
         def lectify_delete_account() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
-                current_username = get_jwt_identity()
-                current_user = self.get_user(current_username)
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
                 
-                if not current_user:
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                
+                current_info_user = self.get_user(current_user)
+                
+                if not current_info_user:
                     return self.create_error_response("User not found", 404)
                 
-                self.users_collection.delete_one({"username": current_username})
+                self.users_collection.delete_one({"username": current_user})
 
                 return jsonify({"message": "Account deleted successfully"}), 200
             
@@ -740,10 +864,16 @@ class Server:
         @self.app.route('/lectify/check_email_reset_password', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_check_email_reset_password() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                
                 data = request.get_json()
                 email = data.get("email").lower().strip()
 
@@ -762,7 +892,7 @@ class Server:
                             "type_verification": "reset_password",
                             "is_verified": False,
                             "code": code,
-                            "timestamp": datetime.datetime.utcnow()
+                            "timestamp": datetime.utcnow()
                         }
                     },
                     upsert=True
@@ -781,10 +911,16 @@ class Server:
         @self.app.route('/lectify/verify_email_reset_password', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_verify_email_reset_password() -> Response:
-            if not self.processing_lock.acquire(blocking=False):
-                return self.create_error_response("Server busy. Please try again shortly", 429)
-            
             try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                
                 data = request.json
                 email = data.get("email").lower().strip()
                 code = data.get("code").upper().strip()
@@ -827,6 +963,112 @@ class Server:
             
             finally:
                 self.processing_lock.release()
+
+        @self.app.route('/lectify/checkout', methods=['POST'])
+        @jwt_required()
+        @self.limiter.limit("5 per minute")
+        def lectify_checkout() -> Response:
+            try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                            
+                if not current_user:
+                    return self.create_error_response("Unauthorized", 401)
+                
+                if not self.get_user(current_user):
+                    return self.create_error_response("User not found", 404)
+                
+                if not self.user_is_free(current_user):
+                    return self.create_error_response("User already has a paid plan", 400)
+            
+                data = request.get_json()
+                plan = data.get("plan").strip().lower()
+                success_url = data.get("success_url").strip()
+                cancel_url = data.get("cancel_url").strip()
+
+                if not plan or plan not in self.plans:
+                    return self.create_error_response("Plan is required", 400)
+                
+                if not success_url or not cancel_url:
+                    return self.create_error_response("Success and cancel URLs are required", 400)
+                
+                validation_error = validate_user_data({
+                    "success_url": success_url,
+                    "cancel_url": cancel_url
+                })
+
+                if validation_error:
+                    return self.create_error_response(validation_error, 400)
+                
+                checkout_session = stripe.checkout.Session.create(
+                    mode='payment',
+                    line_items=[{
+                    'price': self.plans[plan],
+                    'quantity': 1}],
+                    payment_method_types=['card'],
+                    metadata={
+                        'username': current_user,
+                        'plan': plan
+                    },
+
+                    success_url=success_url,
+                    cancel_url=cancel_url,
+                )
+            
+                return jsonify({'checkout_url': checkout_session.url}), 200
+
+            except Exception:
+                return self.create_error_response(f'An error occurred while processing the request', 500)
+            
+            finally:
+                self.processing_lock.release()
+
+        @self.app.route('/lectify/webhook', methods=['POST'])
+        def lectify_webhook() -> Response:
+            try:
+                payload = request.data
+                sig_header = request.headers.get('Stripe-Signature')
+
+                event = stripe.Webhook.construct_event(
+                    payload, sig_header, self.stripe_webhook_secret
+                )
+
+            except ValueError:
+                return self.create_error_response('Invalid payload', 400)
+            
+            except stripe.error.SignatureVerificationError:
+                return self.create_error_response('Invalid signature', 400)
+
+            if event['type'] == 'checkout.session.completed':
+                session = event['data']['object']
+                username = session['metadata']['username']
+                plan = session['metadata']['plan']
+
+                now = datetime.utcnow()
+                end_date = now + self.durations.get(plan, timedelta(days=30))
+
+                user = self.get_user(username)
+
+                if user:
+                    self.users_collection.update_one(
+                        {"username": username},
+                        {"$set": {
+                            "is_free": False,
+                            "plan": plan,
+                            "subscription_end": end_date
+                        }
+                    },
+                    upsert=True
+                )
+                    
+            return jsonify({'status': 'success'}), 200
+        
 
     def run_production(self, host: str = '0.0.0.0', port: int = 5000) -> None:
         self.app.run(debug=False, host=host, port=port, use_reloader=False)
