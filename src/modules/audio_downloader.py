@@ -13,7 +13,7 @@ class AudioDownloader:
         self.output_path: str = 'src/temp'
         os.makedirs(self.output_path, exist_ok=True)
 
-        self.ydl_opts: dict[str, str | bool | int | list[str] | list[dict[str, str]]] = {
+        self.ydl_opts: dict[str, object] = {
             'format': 'bestaudio/best',
             'outtmpl': f'{self.output_path}/%(title)s ({uuid.uuid4().hex}) (Lectify)',
             'postprocessors': [{
@@ -21,12 +21,6 @@ class AudioDownloader:
                 'preferredcodec': 'mp3',
                 'preferredquality': '0'
             }],
-            'postprocessor_args': [
-                '-ar', '16000',
-                '-ac', '1',
-                '-ss', '00:00:00',
-                '-t', '00:01:30'
-            ],
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
@@ -44,6 +38,13 @@ class AudioDownloader:
             ydl_opts['max_sleep_interval'] = random.uniform(6.0, 16.0)
             ydl_opts['concurrent_fragment_downloads'] = 1
             ydl_opts['retries'] = 2
+
+            ydl_opts['postprocessor_args'] = [
+                '-ar', '16000',
+                '-ac', '1',
+                '-ss', '00:00:00',
+                '-t', '00:01:30'
+            ]
         
         else:
             ydl_opts['ratelimit'] = random.randint(3_000_000, 5_000_000)
@@ -51,6 +52,13 @@ class AudioDownloader:
             ydl_opts['max_sleep_interval'] = random.uniform(4.0, 10.0)
             ydl_opts['concurrent_fragment_downloads'] = 6
             ydl_opts['retries'] = 4
+
+            ydl_opts['postprocessor_args'] = [
+                '-ar', '16000',
+                '-ac', '1',
+                '-ss', '00:00:00',
+                '-t', '00:03:00'
+            ]
 
         ydl_opts['http_headers'] = {
             'User-Agent': random.choice(user_agents), 

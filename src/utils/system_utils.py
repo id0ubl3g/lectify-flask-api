@@ -1,4 +1,5 @@
 from email_validator import validate_email, EmailNotValidError
+
 import re
 import os
 

@@ -32,6 +32,7 @@ import yt_dlp
 import string
 import random
 import stripe
+import gridfs
 import magic
 import json
 import os
@@ -67,6 +68,9 @@ class Server:
         client = MongoClient(os.getenv('mongodb_key'))
         db = client['lectify-flask-api']
         
+        self.grid_fs = gridfs.GridFS(db, collection="documents")
+        self.documents_collection = db["documents.files"]
+        
         self.check_email_collection: Collection = db["check_email"]
         self.check_email_collection.create_index("timestamp", expireAfterSeconds=600)
         self.check_email_collection.create_index("email", unique=True)
@@ -86,12 +90,13 @@ class Server:
 
         self.processing_lock = Lock()
         
-        CORS(
-            self.app,
-            origins=["https://lectify.vercel.app"],
-            allow_headers=["Content-Type", "Authorization"],
-            methods=["GET", "POST", "PATCH", "DELETE"]
-        )
+        # CORS(
+        #     self.app,
+        #     origins=["https://lectify.vercel.app"],
+        #     allow_headers=["Content-Type", "Authorization"],
+        #     methods=["GET", "POST", "PATCH", "DELETE"]
+        # )
+        CORS(self.app)
                 
         self.youtube_url: str = None
         self.output_format: str = None
@@ -124,14 +129,17 @@ class Server:
         self.output_path: str = 'src/temp'
         self.filepath_secure: str = None
 
-        self.file_root_markdown: str = None
-        self.file_root_pdf: str = None
-        self.file_root_audio: str = None
+        self.relative_path_markdown: str = None
+        self.relative_path_pdf: str = None
+        self.relative_path_audio: str = None
 
         self.youtube_regex = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
         self.max_url_length: int = 200
 
         self.prompt: str = None
+
+        self.relative_path_audio_webm: str = None
+        self.relative_path_audio_mp3: str = None
 
         self._register_routes()
         init_flasgger(self.app)
@@ -141,13 +149,16 @@ class Server:
         self.output_format: str = None
         self.language_select: str = None
 
-        self.file_root_markdown: str = None
-        self.file_root_pdf: str = None
-        self.file_root_audio: str = None
+        self.relative_path_markdown: str = None
+        self.relative_path_pdf: str = None
+        self.relative_path_audio: str = None
 
         self.filepath_secure: str = None
 
         self.prompt: str = None
+
+        self.relative_path_audio_webm: str = None
+        self.relative_path_audio_mp3: str = None
 
     def get_user(self, username) -> dict | None:
         return self.users_collection.find_one({"username": username})
@@ -159,7 +170,7 @@ class Server:
         return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6)).strip()
     
     def is_email_verified(self, email) -> bool:
-        return self.check_email_register_collection.find_one({
+        return self.check_email_collection.find_one({
             "email": email,
             "is_verified": True}) is not None
     
@@ -193,10 +204,12 @@ class Server:
                 if identity:
                     return identity
             
+                endpoint = request.endpoint
+                if endpoint not in ('lectify_summarize', 'lectify_questions'):
+                    return get_remote_address()
+    
             except Exception:
                 pass
-            
-            return get_remote_address()
     
     def check_and_apply_block(self, current_user: str, increment: bool = True) -> Response | None:
         block_key = f"blocked:{current_user}"
@@ -248,7 +261,7 @@ class Server:
         def after_request(response) -> Response:
             endpoint = request.endpoint
             if endpoint == 'lectify_summarize':
-                clean_up(self.file_root_markdown, self.file_root_pdf, self.file_root_audio)
+                clean_up(self.relative_path_markdown, self.relative_path_pdf, self.relative_path_audio)
                 self.reset_values()
                 if self.processing_lock.locked():
                     self.processing_lock.release()
@@ -299,9 +312,15 @@ class Server:
                 if len(self.youtube_url) > self.max_url_length:
                     return self.create_error_response(f'URL exceeds maximum length of {self.max_url_length} characters', 400)
 
+                if not self.youtube_url.startswith("https://"):
+                    self.youtube_url = "https://" + self.youtube_url
+
                 if not re.match(self.youtube_regex, self.youtube_url):
                     return self.create_error_response('Invalid YouTube URL', 400)
-
+                
+                if not self.output_format:
+                    return self.create_error_response('Missing output format', 400)
+                
                 if self.output_format not in self.valid_formats:
                     return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_formats)}", 400)
                 
@@ -317,17 +336,36 @@ class Server:
                         
                     case 'en-US':
                         self.prompt = prompt_enUS
+                
+                if not self.user_is_free(current_user):
+                    file_documents_collection = self.documents_collection.find_one({
+                        "youtube_url": self.youtube_url,
+                        "filetype": self.output_format,
+                        "language": self.language_select
+                    })
+
+                    if file_documents_collection:
+                        grid_out = self.grid_fs.get(file_documents_collection["_id"])
+                        file_data = grid_out.read()
+                        mimetype = "application/pdf" if self.output_format == "pdf" else "text/markdown"
+                        return Response(
+                                file_data,
+                                mimetype=mimetype,
+                                headers={
+                                    "Content-Disposition": f"attachment; filename={grid_out.filename}"
+                            }
+                        )
 
                 try:
                     response_audio_downloader = AudioDownloader().download_audio(self.youtube_url, lambda: self.user_is_free())
                     
                     relative_path_audio = response_audio_downloader['data']
-                    relative_path_markdown = f'{relative_path_audio.replace(".wav", "")}.md'
+                    relative_path_markdown = f'{relative_path_audio.replace(".mp3", "")}.md'
                     relative_path_pdf = f'{relative_path_markdown.replace(".md", "")}.pdf'
                     
-                    self.file_root_audio = os.path.abspath(relative_path_audio)
-                    self.file_root_markdown = os.path.abspath(relative_path_markdown)
-                    self.file_root_pdf = os.path.abspath(relative_path_pdf)
+                    self.relative_path_audio = os.path.abspath(relative_path_audio)
+                    self.relative_path_markdown = os.path.abspath(relative_path_markdown)
+                    self.relative_path_pdf = os.path.abspath(relative_path_pdf)
                     
                     try:
                         response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio, self.language_select)
@@ -345,10 +383,30 @@ class Server:
 
                                     match self.output_format:
                                         case 'md':
-                                            return send_file(self.file_root_markdown, mimetype='text/markdown', as_attachment=True), 201
+                                            if not self.user_is_free(current_user):
+                                                with open(self.relative_path_markdown, 'rb') as file:
+                                                    self.grid_fs.put(
+                                                        file, 
+                                                        filename=os.path.basename(self.relative_path_markdown),
+                                                        youtube_url=self.youtube_url,
+                                                        filetype='md',
+                                                        language=self.language_select
+                                                    )
+                                                
+                                            return send_file(self.relative_path_markdown, mimetype='text/markdown', as_attachment=True), 201
                                         
                                         case 'pdf':
-                                            return send_file(self.file_root_pdf, as_attachment=True), 201
+                                            if not self.user_is_free(current_user):
+                                                with open(self.relative_path_pdf, 'rb') as file:
+                                                    self.grid_fs.put(
+                                                        file, 
+                                                        filename=os.path.basename(self.relative_path_pdf),
+                                                        youtube_url=self.youtube_url,
+                                                        filetype='pdf',
+                                                        language=self.language_select
+                                                    )
+
+                                            return send_file(self.relative_path_pdf, as_attachment=True), 201
                                 
                                 except FileNotFoundError:
                                     return self.create_error_response('File not found', 400)
@@ -480,8 +538,8 @@ class Server:
                             return self.create_error_response(f'Error during extraction of PDF text', 400)
             
             except Exception:
-                return self.create_error_response(f'An error occurred while processing the request', 500)
-
+                return self.create_error_response('An error occurred while processing the request', 500)
+            
         @self.app.route('/lectify/check_email_register', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_check_email_register() -> Response:
@@ -722,7 +780,8 @@ class Server:
                     "email": current_info_user['email'],
                     "firstname": current_info_user['firstname'],
                     "lastname": current_info_user['lastname'],
-                    "is_free": current_info_user['is_free']
+                    "is_free": current_info_user['is_free'],
+                    "created_at": current_info_user['created_at']
                 }
 
                 if not user_is_free:
@@ -832,10 +891,10 @@ class Server:
             finally:
                 self.processing_lock.release()
         
-        @self.app.route('/lectify/delete_account', methods=['DELETE'])
+        @self.app.route('/lectify/check_email_delete_account', methods=['POST'])
         @jwt_required()
         @self.limiter.limit("1 per minute")
-        def lectify_delete_account() -> Response:
+        def lectify_check_email_delete_account() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
                     return self.create_error_response("Server busy. Please try again shortly", 429)
@@ -851,7 +910,115 @@ class Server:
                 if not current_info_user:
                     return self.create_error_response("User not found", 404)
                 
+                email = current_info_user['email']
+                code = self.generate_code()
+                
+                self.check_email_collection.update_one({
+                    "email": email},
+                    {
+                        "$set": {
+                            "type_verification": "delete_account",
+                            "is_verified": False,
+                            "code": code,
+                            "timestamp": datetime.utcnow()
+                        }
+                    },
+                    upsert=True
+                )
+
+                SendEmailVerification().send_verification_email(email, code)
+
+                return jsonify({"message": "Verification code sent to email",}), 200
+            
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request', 500)
+            
+            finally:
+                self.processing_lock.release()
+        
+        @self.app.route('/lectify/verify_email_delete_account', methods=['POST'])
+        @jwt_required()
+        @self.limiter.limit("1 per minute")
+        def lectify_verify_email_delete_account() -> Response:
+            try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                
+                current_info_user = self.get_user(current_user)
+                
+                if not current_info_user:
+                    return self.create_error_response("User not found", 404)
+                
+                email = current_info_user['email']
+                
+                data = request.get_json()
+                code = data.get("code").upper().strip()
+
+                if not code:
+                    return self.create_error_response("Code is required", 400)
+                
+                check_email_data = self.check_email_collection.find_one({"email": email})
+
+                if not check_email_data:
+                    return self.create_error_response("Email not found", 404)
+                
+                if check_email_data['type_verification'] != 'delete_account':
+                    return self.create_error_response("Invalid verification type", 400)
+                
+                validation_error = validate_user_data({
+                    "code": code
+                })
+
+                if validation_error:
+                    return self.create_error_response(validation_error, 400)
+                
+                if check_email_data['code'] != code:
+                    return self.create_error_response("Invalid verification code", 400)
+                
+                self.check_email_collection.update_one(
+                    {"email": email},
+                    {"$set": {"is_verified": True}}
+                )
+
+                return jsonify({"message": "Email verified successfully"}), 200
+            
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request', 500)
+            
+            finally:
+                self.processing_lock.release()
+                
+        @self.app.route('/lectify/delete_account', methods=['DELETE'])
+        @jwt_required()
+        @self.limiter.limit("1 per minute")
+        def lectify_delete_account() -> Response:
+            try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                
+                current_info_user = self.get_user(current_user)
+                email = current_info_user['email']
+                
+                if not current_info_user:
+                    return self.create_error_response("User not found", 404)
+                
+                if not self.is_email_verified(email):
+                    return self.create_error_response("Email not verified", 400)
+
                 self.users_collection.delete_one({"username": current_user})
+                self.check_email_collection.delete_one({"email": email})
 
                 return jsonify({"message": "Account deleted successfully"}), 200
             
@@ -1069,6 +1236,5 @@ class Server:
                     
             return jsonify({'status': 'success'}), 200
         
-
     def run_production(self, host: str = '0.0.0.0', port: int = 5000) -> None:
         self.app.run(debug=False, host=host, port=port, use_reloader=False)
