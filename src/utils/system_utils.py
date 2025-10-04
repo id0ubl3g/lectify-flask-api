@@ -45,6 +45,9 @@ def validate_user_data(data: dict) -> str | None:
         "code": [
             (r'^[A-Za-z0-9]{6}$', "Code must be exactly 6 alphanumeric characters.")
         ],
+        "token": [
+            (r'^[a-f0-9]{64}$', "Token must be a 64-character hexadecimal string.")
+        ],
         "success_url": [
             (r'^https://', "Success URL must start with https://"),
             (r'^.{1,2083}$', "Success URL must be between 1 and 2083 characters long"),

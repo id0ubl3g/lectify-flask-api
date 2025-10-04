@@ -5,7 +5,7 @@ from src.modules.document_builder import DocumentBuilder
 from src.modules.convert_document import ConvertDocument
 from src.modules.extract_text import ExtractText
 
-from config.prompt_config import prompt_ptBR, prompt_enUS, prompt_questions
+from config.prompt_config import prompt_summarize, prompt_questions
 
 from src.utils.send_email_verification import SendEmailVerification
 from src.utils.system_utils import clean_up, is_valid_email, validate_user_data
@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 from threading import Lock
 from redis import Redis
 import requests
+import secrets
 import yt_dlp
 import string
 import random
@@ -65,6 +66,7 @@ class Server:
         }
 
         self.jwt: JWTManager = JWTManager(self.app)
+        
         client = MongoClient(os.getenv('mongodb_key'))
         db = client['lectify-flask-api']
         
@@ -96,7 +98,13 @@ class Server:
         #     allow_headers=["Content-Type", "Authorization"],
         #     methods=["GET", "POST", "PATCH", "DELETE"]
         # )
-        CORS(self.app)
+
+        CORS(
+            self.app,
+            origins="*",
+            allow_headers=["Content-Type", "Authorization"],
+            methods=["GET", "POST", "PATCH", "DELETE"]
+        )
                 
         self.youtube_url: str = None
         self.output_format: str = None
@@ -136,29 +144,13 @@ class Server:
         self.youtube_regex = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
         self.max_url_length: int = 200
 
-        self.prompt: str = None
+        self.prompt: str = prompt_summarize
 
         self.relative_path_audio_webm: str = None
         self.relative_path_audio_mp3: str = None
 
         self._register_routes()
         init_flasgger(self.app)
-    
-    def reset_values(self) -> None:
-        self.youtube_url: str = None
-        self.output_format: str = None
-        self.language_select: str = None
-
-        self.relative_path_markdown: str = None
-        self.relative_path_pdf: str = None
-        self.relative_path_audio: str = None
-
-        self.filepath_secure: str = None
-
-        self.prompt: str = None
-
-        self.relative_path_audio_webm: str = None
-        self.relative_path_audio_mp3: str = None
 
     def get_user(self, username) -> dict | None:
         return self.users_collection.find_one({"username": username})
@@ -168,6 +160,9 @@ class Server:
     
     def generate_code(self) -> str:
         return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6)).strip()
+
+    def generate_hash(self) -> str:
+        return secrets.token_hex(32)
     
     def is_email_verified(self, email) -> bool:
         return self.check_email_collection.find_one({
@@ -195,7 +190,10 @@ class Server:
 
     def dynamic_limit(self) -> str | None:
         username = get_jwt_identity()
-        return "5 per 30 days" if self.user_is_free(username) else None
+        if self.user_is_free(username):
+            return "30 per 30 days"
+        
+        return None
     
     def user_or_ip(self) -> str:
             try:
@@ -203,14 +201,16 @@ class Server:
                 identity = get_jwt_identity()
                 if identity:
                     return identity
+                
+            except Exception:
+                pass
             
                 endpoint = request.endpoint
                 if endpoint not in ('lectify_summarize', 'lectify_questions'):
                     return get_remote_address()
-    
-            except Exception:
-                pass
-    
+                
+                return self.create_error_response("Unauthorized or invalid request")
+
     def check_and_apply_block(self, current_user: str, increment: bool = True) -> Response | None:
         block_key = f"blocked:{current_user}"
         count_key = f"count429:{current_user}"
@@ -262,13 +262,11 @@ class Server:
             endpoint = request.endpoint
             if endpoint == 'lectify_summarize':
                 clean_up(self.relative_path_markdown, self.relative_path_pdf, self.relative_path_audio)
-                self.reset_values()
                 if self.processing_lock.locked():
                     self.processing_lock.release()
 
             if endpoint == 'lectify_questions':
                 clean_up(self.filepath_secure)
-                self.reset_values()
                 if self.processing_lock.locked():
                     self.processing_lock.release()
             
@@ -277,7 +275,6 @@ class Server:
         @self.app.route('/lectify/summarize', methods=['POST'])
         @jwt_required()
         @self.limiter.limit(lambda: self.dynamic_limit())
-        @self.limiter.limit("5 per minute")
         def lectify_summarize() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
@@ -329,13 +326,6 @@ class Server:
                 
                 if self.language_select not in self.valid_languages_formats:
                     return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_languages_formats)}", 400)
-
-                match self.language_select:
-                    case 'pt-BR':
-                        self.prompt = prompt_ptBR
-                        
-                    case 'en-US':
-                        self.prompt = prompt_enUS
                 
                 if not self.user_is_free(current_user):
                     file_documents_collection = self.documents_collection.find_one({
@@ -441,7 +431,6 @@ class Server:
         @self.app.route('/lectify/questions', methods=['POST'])
         @jwt_required()
         @self.limiter.limit(lambda: self.dynamic_limit())
-        @self.limiter.limit("5 per minute")
         def lectify_questions() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
@@ -554,13 +543,17 @@ class Server:
                     return response_check_and_apply_block
                                 
                 data = request.get_json()
-                email = data.get("email").lower().strip()
+
+                email = (data.get("email") or "").lower().strip()
 
                 if not email:
                     return self.create_error_response("Email is required", 400)
                 
                 if not is_valid_email(email):
                     return self.create_error_response("Invalid email format", 400)
+                
+                if self.get_email(email):
+                    return self.create_error_response("Email already exists", 400)
                 
                 code = self.generate_code()
                 
@@ -577,7 +570,7 @@ class Server:
                     upsert=True
                 )
 
-                SendEmailVerification().send_verification_email(email, code)
+                SendEmailVerification().send_verification_email(email, code, 'create_account')
 
                 return jsonify({"message": "Verification code sent to email",}), 200
             
@@ -602,8 +595,8 @@ class Server:
                                 
                 data = request.get_json()
 
-                email = data.get("email").lower().strip()
-                code = data.get("code").upper().strip()
+                email = (data.get("email") or "").lower().strip()
+                code = (data.get("code") or "").upper().strip()
 
                 if not email or not code:
                     return self.create_error_response("Email and code are required", 400)
@@ -656,11 +649,11 @@ class Server:
                             
                 data = request.get_json()
 
-                username = data.get("username").lower().strip()
-                password = data.get("password").strip()
-                email = data.get("email").lower().strip()
-                firstname = data.get("firstname").strip().capitalize()
-                lastname = data.get("lastname").strip().capitalize()
+                username = (data.get("username") or "").lower().strip()
+                password = (data.get("password") or "").strip()
+                email = (data.get("email") or "").lower().strip()
+                firstname = (data.get("firstname") or "").strip().capitalize()
+                lastname = (data.get("lastname") or "").strip().capitalize()
                 
                 if not username or not password or not email or not firstname or not lastname:
                     return self.create_error_response("Username, password, email, firstname and lastname are required", 400)
@@ -700,16 +693,16 @@ class Server:
 
                 self.check_email_collection.delete_one({"email": email})
 
-                return jsonify({"message": "User registered successfully"}), 201
+                return self.create_error_response("User registered successfully", 201)
             
-            except Exception:
-                return self.create_error_response('An error occurred while processing the request', 500)
+            except Exception as e:
+                return self.create_error_response(f'{e}An error occurred while processing the request', 500)
             
             finally:
                 self.processing_lock.release()
 
         @self.app.route('/lectify/login', methods=['POST'])
-        @self.limiter.limit("5 per minute")
+        @self.limiter.limit("10 per minute")
         def lectify_login() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
@@ -723,12 +716,27 @@ class Server:
                                 
                 data = request.get_json()
 
-                username = data.get("username").lower().strip()
-                password = data.get("password")
+                username = (data.get("username") or "").lower().strip()
+                email = (data.get("email") or "").lower().strip()
+                password = (data.get("password") or "").strip()
 
-                if not username or not password:
-                    return self.create_error_response("Username and password are required", 400)
+                if email and not is_valid_email(email):
+                    return self.create_error_response("Invalid email format", 400)
                 
+                if not password:
+                    return self.create_error_response("Password is required", 400)
+
+                if not username and not email:
+                    return self.create_error_response("You must provide either a email or an email", 400)
+                
+                if email:
+                    user_data = self.get_email(email)
+                    
+                    if not user_data:
+                        return self.create_error_response("Invalid email or password", 401)
+                    
+                    username = user_data['username']
+
                 validation_error = validate_user_data({
                     "username": username,
                     "password": password
@@ -740,7 +748,7 @@ class Server:
                 user = self.get_user(username)
 
                 if not user or not check_password_hash(user['password'], password):
-                    return self.create_error_response("Invalid username or password", 401)
+                    return self.create_error_response("Invalid email or password", 401)
 
                 access_token = create_access_token(identity=username)
                 refresh_token = create_refresh_token(identity=username)
@@ -827,7 +835,7 @@ class Server:
         
         @self.app.route('/lectify/update_profile', methods=['PATCH'])
         @jwt_required()
-        @self.limiter.limit("5 per minute")
+        @self.limiter.limit("10 per minute")
         def lectify_update_profile() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
@@ -859,27 +867,17 @@ class Server:
                         return self.create_error_response("Lastname cannot be empty", 400)
                     
                     update_fields['lastname'] = data['lastname'].strip().capitalize()
-                
-                if "password" in data:
-                    if not data['password'].strip():
-                        return self.create_error_response("Password cannot be empty", 400)
-                    
-                    new_password = data['password'].strip()
-                
+                                    
                 if not update_fields:
                     return self.create_error_response("No fields to update", 400)
                 
                 validation_error = validate_user_data({
-                    "password": new_password if "password" in data else None,
                     "firstname": update_fields.get('firstname'),
                     "lastname": update_fields.get('lastname')
                 })
 
                 if validation_error:
                     return self.create_error_response(validation_error, 400)
-                
-                if "password" in data:
-                    update_fields['password'] = generate_password_hash(new_password)
                 
                 self.users_collection.update_one({"username": current_user}, {"$set": update_fields})
                 
@@ -893,7 +891,7 @@ class Server:
         
         @self.app.route('/lectify/check_email_delete_account', methods=['POST'])
         @jwt_required()
-        @self.limiter.limit("1 per minute")
+        @self.limiter.limit("5 per minute")
         def lectify_check_email_delete_account() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
@@ -926,7 +924,7 @@ class Server:
                     upsert=True
                 )
 
-                SendEmailVerification().send_verification_email(email, code)
+                SendEmailVerification().send_verification_email(email, code, 'delete_account')
 
                 return jsonify({"message": "Verification code sent to email",}), 200
             
@@ -938,7 +936,7 @@ class Server:
         
         @self.app.route('/lectify/verify_email_delete_account', methods=['POST'])
         @jwt_required()
-        @self.limiter.limit("1 per minute")
+        @self.limiter.limit("5 per minute")
         def lectify_verify_email_delete_account() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
@@ -1028,9 +1026,9 @@ class Server:
             finally:
                 self.processing_lock.release()
         
-        @self.app.route('/lectify/check_email_reset_password', methods=['POST'])
+        @self.app.route('/lectify/ping_check_email_reset_password', methods=['POST'])
         @self.limiter.limit("5 per minute")
-        def lectify_check_email_reset_password() -> Response:
+        def lectify_ping_check_email_reset_password() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
                     return self.create_error_response("Server busy. Please try again shortly", 429)
@@ -1042,32 +1040,36 @@ class Server:
                     return response_check_and_apply_block
                 
                 data = request.get_json()
-                email = data.get("email").lower().strip()
 
-                if not email:
-                    return self.create_error_response("Email is required", 400)
+                email = (data.get("email") or "").lower().strip()
+                base_url = (data.get("base_url") or "").lower().strip()
+                reset_password_page_url = (data.get("reset_password_page_url") or "").lower().strip()
+
+                if not email or not base_url or not reset_password_page_url:
+                    return self.create_error_response("Email, Base URL and Reset Password Page URL are required", 400)
                 
                 if not self.get_email(email):
                     return self.create_error_response("Email not found", 404)
                 
-                code = self.generate_code()
+                token = self.generate_hash()
                 
                 self.check_email_collection.update_one({
                     "email": email},
                     {
                         "$set": {
                             "type_verification": "reset_password",
-                            "is_verified": False,
-                            "code": code,
+                            "token": token,
                             "timestamp": datetime.utcnow()
                         }
                     },
                     upsert=True
                 )
 
-                SendEmailVerification().send_verification_email(email, code)
+                link_verification = f"{base_url}/{reset_password_page_url}/{email}/{token}"
 
-                return jsonify({"message": "Password reset code sent to email"}), 200
+                SendEmailVerification().send_verification_email(email, link_verification, 'reset_password')
+
+                return jsonify({"message": "Verification sent to email",}), 200
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
@@ -1075,9 +1077,9 @@ class Server:
             finally:
                 self.processing_lock.release()
         
-        @self.app.route('/lectify/verify_email_reset_password', methods=['POST'])
+        @self.app.route('/lectify/pong_verify_email_reset_password', methods=['POST'])
         @self.limiter.limit("5 per minute")
-        def lectify_verify_email_reset_password() -> Response:
+        def lectify_pong_verify_email_reset_password() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
                     return self.create_error_response("Server busy. Please try again shortly", 429)
@@ -1088,18 +1090,19 @@ class Server:
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
                 
-                data = request.json
-                email = data.get("email").lower().strip()
-                code = data.get("code").upper().strip()
-                new_password = data.get("new_password")
+                data = request.get_json()
 
-                if not email or not code or not new_password:
-                    return self.create_error_response("Email, code, and new password are required", 400)
+                email = (data.get("email") or "").lower().strip()
+                token = (data.get("token") or "").strip()
+                new_password = (data.get("new_password") or "").strip()
+
+                if not email or not token or not new_password:
+                    return self.create_error_response("Email, Token, and new password are required", 400)
                 
                 validation_error = validate_user_data({
                     "email": email,
+                    "token": token,
                     "password": new_password,
-                    "code": code
                 })
 
                 if validation_error:
@@ -1109,12 +1112,12 @@ class Server:
 
                 if not check_email_data:
                     return self.create_error_response("Email not found", 404)
-
-                if check_email_data['code'] != code:
-                    return self.create_error_response("Invalid verification code", 400)
                 
                 if check_email_data['type_verification'] != 'reset_password':
                     return self.create_error_response("Invalid verification type", 400)
+                
+                if check_email_data['token'] != token:
+                    return self.create_error_response("Invalid verification Token", 400)
                 
                 hashed_password = generate_password_hash(new_password)
                 self.users_collection.update_one(
@@ -1133,7 +1136,7 @@ class Server:
 
         @self.app.route('/lectify/checkout', methods=['POST'])
         @jwt_required()
-        @self.limiter.limit("5 per minute")
+        @self.limiter.limit("10 per minute")
         def lectify_checkout() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
