@@ -21,6 +21,9 @@ from flask_cors import CORS
 from pymongo.collection import Collection
 from pymongo import MongoClient
 
+import cloudinary.uploader
+import cloudinary
+
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
@@ -96,14 +99,14 @@ class Server:
         #     self.app,
         #     origins=["https://lectify.vercel.app"],
         #     allow_headers=["Content-Type", "Authorization"],
-        #     methods=["GET", "POST", "PATCH", "DELETE"]
+        #     methods=["GET", "POST", "PUT", "PATCH", "DELETE"]
         # )
 
         CORS(
             self.app,
             origins="*",
             allow_headers=["Content-Type", "Authorization"],
-            methods=["GET", "POST", "PATCH", "DELETE"]
+            methods=["GET", "POST", "PUT", "PATCH", "DELETE"]
         )
                 
         self.youtube_url: str = None
@@ -133,6 +136,25 @@ class Server:
             '.bak', '.old', '.swp',
             '.chm', '.mdb', '.sql', '.db'
         })
+
+        cloudinary.config(
+            cloud_name = os.getenv('cloudinary_name'),
+            api_key = os.getenv('cloudinary_api_key'),
+            api_secret = os.getenv('cloudinary_api_secret'),
+            secure=True
+        )
+
+        self.valid_format_images: list['str'] = ['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'svg', 'webp', 'heic', 'heif']
+
+        self.expected_image_mime_types = {
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "gif": "image/gif",
+            "bmp": "image/bmp",
+            "tiff": "image/tiff",
+            "svg": "image/svg+xml"
+        }
 
         self.output_path: str = 'src/temp'
         self.filepath_secure: str = None
@@ -261,12 +283,17 @@ class Server:
         def after_request(response) -> Response:
             endpoint = request.endpoint
             if endpoint == 'lectify_summarize':
-                clean_up(self.relative_path_markdown, self.relative_path_pdf, self.relative_path_audio)
+                clean_up(
+                    getattr(self, "relative_path_markdown", None),
+                    getattr(self, "relative_path_pdf", None),
+                    getattr(self, "relative_path_audio", None)
+                )
+                
                 if self.processing_lock.locked():
                     self.processing_lock.release()
 
             if endpoint == 'lectify_questions':
-                clean_up(self.filepath_secure)
+                clean_up(getattr(self, "filepath_secure", None))
                 if self.processing_lock.locked():
                     self.processing_lock.release()
             
@@ -445,7 +472,12 @@ class Server:
                 if not current_user:
                     return self.create_error_response("Unauthorized", 401)
             
-                received_file = request.files['file']
+                files = request.files.getlist('file')
+
+                if len(files) > 1:
+                    return self.create_error_response('Exactly one file must be uploaded', 400)
+
+                received_file = files[0]
 
                 if not received_file:
                     return self.create_error_response('No files received', 400)
@@ -465,18 +497,18 @@ class Server:
                 self.filepath_secure = os.path.join(self.output_path, filename_secure)
 
                 if len(filename_secure) > 200:
-                    return self.create_error_response('File name exceeds the maximum length of 100 characters.', 400)
+                    return self.create_error_response('File name exceeds the maximum length of 200 characters.', 400)
 
                 file_extension = self.filepath_secure.split('.')[-1].lower()
 
                 if file_extension not in self.valid_formats:
                     return self.create_error_response(f'Invalid format. Supported formats: {", ".join(self.valid_formats)}', 400)
                 
-                received_file.save(self.filepath_secure)
-
                 for extensions in self.blocked_extensions:
                     if extensions in filename_secure:
                         return self.create_error_response(f'The filename seems suspicious and contains a blocked extension: {extensions}', 400)
+                
+                received_file.save(self.filepath_secure)
                 
                 mime_detector = magic.Magic(mime=True)
                 expected_mime_type = self.expected_mime_types.get(file_extension)
@@ -524,7 +556,7 @@ class Server:
                                 return self.create_error_response(f"Error during chat generation", 400)
 
                         except Exception:
-                            return self.create_error_response(f'Error during extraction of PDF text', 400)
+                            return self.create_error_response('Error during extraction of PDF text', 400)
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
@@ -578,7 +610,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
         
         @self.app.route('/lectify/verify_email_register', methods=['POST'])
         @self.limiter.limit("5 per minute")
@@ -632,7 +665,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
 
         @self.app.route('/lectify/register', methods=['POST'])
         @self.limiter.limit("5 per minute")
@@ -686,20 +720,22 @@ class Server:
                     "firstname": firstname,
                     "lastname": lastname,
                     "is_free": True,
-                    "created_at": datetime.utcnow()
+                    "created_at": datetime.utcnow(),
+                    "image_profile": ""
                 }
 
                 self.users_collection.insert_one(user_data)
 
                 self.check_email_collection.delete_one({"email": email})
 
-                return self.create_error_response("User registered successfully", 201)
+                return jsonify({"message": "User registered successfully"}), 201
             
-            except Exception as e:
-                return self.create_error_response(f'{e}An error occurred while processing the request', 500)
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
 
         @self.app.route('/lectify/login', methods=['POST'])
         @self.limiter.limit("10 per minute")
@@ -745,24 +781,39 @@ class Server:
                 if validation_error:
                     return self.create_error_response(validation_error, 400)
                 
-                user = self.get_user(username)
+                current_info_user = self.get_user(username)
 
-                if not user or not check_password_hash(user['password'], password):
+                if not current_info_user or not check_password_hash(current_info_user['password'], password):
                     return self.create_error_response("Invalid email or password", 401)
+                                
+                if not current_info_user:
+                    return self.create_error_response("User not found", 404)
+                
+                profile_data = {
+                    "username": current_info_user['username'],
+                    "email": current_info_user['email'],
+                    "firstname": current_info_user['firstname'],
+                    "lastname": current_info_user['lastname'],
+                    "is_free": current_info_user['is_free'],
+                    "created_at": current_info_user['created_at'],
+                    "image_profile": current_info_user.get('image_profile', "")
+                }
 
                 access_token = create_access_token(identity=username)
                 refresh_token = create_refresh_token(identity=username)
 
                 return jsonify({
                     "access_token": access_token,
-                    "refresh_token": refresh_token
+                    "refresh_token": refresh_token,
+                    "profile": profile_data
                 }), 200
             
-            except Exception as e:
-                return self.create_error_response(f'{e}An error occurred while processing the request', 500)
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
         
         @self.app.route('/lectify/profile', methods=['GET'])
         @jwt_required()        
@@ -789,7 +840,8 @@ class Server:
                     "firstname": current_info_user['firstname'],
                     "lastname": current_info_user['lastname'],
                     "is_free": current_info_user['is_free'],
-                    "created_at": current_info_user['created_at']
+                    "created_at": current_info_user['created_at'],
+                    "image_profile": current_info_user.get('image_profile', "")
                 }
 
                 if not user_is_free:
@@ -802,7 +854,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
         
         @self.app.route('/lectify/refresh_token', methods=['POST'])
         @jwt_required(refresh=True)
@@ -812,7 +865,7 @@ class Server:
                 if not self.processing_lock.acquire(blocking=False):
                     return self.create_error_response("Server busy. Please try again shortly", 429)
                 
-                current_user = self.user_or_ip()
+                current_user = get_jwt_identity()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
@@ -831,7 +884,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
         
         @self.app.route('/lectify/update_profile', methods=['PATCH'])
         @jwt_required()
@@ -857,27 +911,43 @@ class Server:
                 update_fields = {}
 
                 if "firstname" in data:
+                    if data['firstname'].strip() == current_info_user['firstname']:
+                        return self.create_error_response("Firstname is the same as the current one", 400)
+                    
                     if not data['firstname'].strip():
                         return self.create_error_response("Firstname cannot be empty", 400)
                     
                     update_fields['firstname'] = data['firstname'].strip().capitalize()
                 
                 if "lastname" in data:
+                    if data['lastname'].strip() == current_info_user['lastname']:
+                        return self.create_error_response("Lastname is the same as the current one", 400)
+                    
                     if not data['lastname'].strip():
                         return self.create_error_response("Lastname cannot be empty", 400)
                     
                     update_fields['lastname'] = data['lastname'].strip().capitalize()
-                                    
-                if not update_fields:
-                    return self.create_error_response("No fields to update", 400)
+
+                if "password" in data:
+                    if not data['password'].strip():
+                        return self.create_error_response("Password cannot be empty", 400)
+                    
+                    new_password = data['password'].strip()
                 
                 validation_error = validate_user_data({
                     "firstname": update_fields.get('firstname'),
-                    "lastname": update_fields.get('lastname')
+                    "lastname": update_fields.get('lastname'),
+                    "password": new_password if "password" in data else None
                 })
 
                 if validation_error:
                     return self.create_error_response(validation_error, 400)
+
+                if "password" in data: 
+                    update_fields['password'] = generate_password_hash(new_password)
+
+                if not update_fields:
+                    return self.create_error_response("No fields to update", 400)
                 
                 self.users_collection.update_one({"username": current_user}, {"$set": update_fields})
                 
@@ -887,12 +957,113 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
-        
-        @self.app.route('/lectify/check_email_delete_account', methods=['POST'])
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
+
+        @self.app.route('/lectify/update_image_profile', methods=['PUT'])
+        @jwt_required()
+        @self.limiter.limit("10 per minute")
+        def lectify_update_image_profile() -> Response:
+            try:
+                if not self.processing_lock.acquire(blocking=False):
+                    return self.create_error_response("Server busy. Please try again shortly", 429)
+                
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                                
+                current_info_user = self.get_user(current_user)
+                
+                if not current_info_user:
+                    return self.create_error_response("User not found", 404)
+                
+                
+                files = request.files.getlist('file')
+
+                if len(files) > 1:
+                    return self.create_error_response('Exactly one file must be uploaded', 400)
+
+                if len(files) == 0 or not files[0]:
+                    if not current_info_user['image_profile']:
+                        return self.create_error_response('No profile image to remove', 400)
+
+                    cloudinary.uploader.destroy(f'image_profile_{current_user}', resource_type="image")
+                    self.users_collection.update_one({"username": current_user}, {"$set": {"image_profile": ""}})
+                    return jsonify({'message': 'Profile image removed successfully'}), 200
+
+                received_file = files[0]
+
+                received_file.stream.seek(0, os.SEEK_END)
+                file_size = received_file.stream.tell()
+                received_file.stream.seek(0)
+
+                if file_size > 5 * 1024 * 1024:
+                    return self.create_error_response('File size exceeds the maximum limit of 5 MB.', 413)
+                
+                if not os.path.exists(self.output_path):
+                    os.makedirs(self.output_path)
+
+                filename_nosecure = received_file.filename
+                filename_secure = secure_filename(filename_nosecure)
+
+                file_extension = filename_secure.split('.')[-1].lower()
+                self.filepath_secure = os.path.join(self.output_path, f'image_profile_{current_user}.{file_extension}')
+                
+                if file_extension not in self.valid_format_images:
+                    return self.create_error_response(f'Invalid format. Supported formats: {", ".join(self.valid_formats_images)}', 400)
+                
+                for extensions in self.blocked_extensions:
+                    if extensions in filename_secure:
+                        return self.create_error_response(f'The filename seems suspicious and contains a blocked extension: {extensions}', 400)
+                
+                received_file.save(self.filepath_secure)
+
+                mime_detector = magic.Magic(mime=True)
+                expected_mime_type = self.expected_image_mime_types.get(file_extension)
+                detected_mime_type = mime_detector.from_file(self.filepath_secure)
+
+                if detected_mime_type != expected_mime_type:
+                    return self.create_error_response(f'Invalid file type. Detected: {detected_mime_type}. Expected: {expected_mime_type}', 400)
+
+                upload_result = cloudinary.uploader.upload(
+                    self.filepath_secure,
+                    public_id=f'image_profile_{current_user}',
+                    overwrite=True, 
+                    resource_type="image",
+                    invalidate=True,
+                    format='webp',
+                    transformation=[
+                        {"width": 500, "height": 500, "crop": "fill", "gravity": "center"},
+                        {"quality": "auto", "fetch_format": "auto"}
+                    ]
+                )
+
+                image_url = upload_result.get('secure_url')
+                
+                if not image_url:
+                    return self.create_error_response('Error uploading image to Cloudinary', 500)
+                
+                self.users_collection.update_one({"username": current_user}, {"$set": {"image_profile": image_url}})
+
+                return jsonify({"message": "Profile image updated successfully", "image_profile": image_url}), 200
+                
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request', 500)
+
+            finally:
+                clean_up(
+                    getattr(self, "filepath_secure", None),
+                    getattr(self, "filepath_secure_webp", None),
+                )
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
+
+        @self.app.route('/lectify/ping_email_delete_account', methods=['POST'])
         @jwt_required()
         @self.limiter.limit("5 per minute")
-        def lectify_check_email_delete_account() -> Response:
+        def lectify_ping_email_delete_account() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
                     return self.create_error_response("Server busy. Please try again shortly", 429)
@@ -909,22 +1080,32 @@ class Server:
                     return self.create_error_response("User not found", 404)
                 
                 email = current_info_user['email']
-                code = self.generate_code()
+
+                data = request.get_json()
+
+                base_url = (data.get("base_url") or "").lower().strip()
+                reset_password_page_url = (data.get("reset_password_page_url") or "").lower().strip()
+
+                if not base_url or not reset_password_page_url:
+                    return self.create_error_response("Base URL and Reset Password Page URL are required", 400)
+                
+                token = self.generate_hash()
                 
                 self.check_email_collection.update_one({
                     "email": email},
                     {
                         "$set": {
                             "type_verification": "delete_account",
-                            "is_verified": False,
-                            "code": code,
+                            "token": token,
                             "timestamp": datetime.utcnow()
                         }
                     },
                     upsert=True
                 )
 
-                SendEmailVerification().send_verification_email(email, code, 'delete_account')
+                link_verification = f"{base_url}/{reset_password_page_url}/{token}"
+
+                SendEmailVerification().send_verification_email(email, link_verification, 'delete_account')
 
                 return jsonify({"message": "Verification code sent to email",}), 200
             
@@ -932,12 +1113,13 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
         
-        @self.app.route('/lectify/verify_email_delete_account', methods=['POST'])
+        @self.app.route('/lectify/pong_email_delete_account', methods=['DELETE'])
         @jwt_required()
         @self.limiter.limit("5 per minute")
-        def lectify_verify_email_delete_account() -> Response:
+        def lectify_pong_email_delete_account() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
                     return self.create_error_response("Server busy. Please try again shortly", 429)
@@ -956,10 +1138,11 @@ class Server:
                 email = current_info_user['email']
                 
                 data = request.get_json()
-                code = data.get("code").upper().strip()
 
-                if not code:
-                    return self.create_error_response("Code is required", 400)
+                token = (data.get("token") or "").strip()
+
+                if not token:
+                    return self.create_error_response("Token is required", 400)
                 
                 check_email_data = self.check_email_collection.find_one({"email": email})
 
@@ -970,51 +1153,15 @@ class Server:
                     return self.create_error_response("Invalid verification type", 400)
                 
                 validation_error = validate_user_data({
-                    "code": code
+                    "token": token
                 })
 
                 if validation_error:
                     return self.create_error_response(validation_error, 400)
                 
-                if check_email_data['code'] != code:
-                    return self.create_error_response("Invalid verification code", 400)
+                if check_email_data['token'] != token:
+                    return self.create_error_response("Invalid verification token", 400)
                 
-                self.check_email_collection.update_one(
-                    {"email": email},
-                    {"$set": {"is_verified": True}}
-                )
-
-                return jsonify({"message": "Email verified successfully"}), 200
-            
-            except Exception:
-                return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                self.processing_lock.release()
-                
-        @self.app.route('/lectify/delete_account', methods=['DELETE'])
-        @jwt_required()
-        @self.limiter.limit("1 per minute")
-        def lectify_delete_account() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
-                current_user = self.user_or_ip()
-                
-                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
-                if response_check_and_apply_block:
-                    return response_check_and_apply_block
-                                
-                current_info_user = self.get_user(current_user)
-                email = current_info_user['email']
-                
-                if not current_info_user:
-                    return self.create_error_response("User not found", 404)
-                
-                if not self.is_email_verified(email):
-                    return self.create_error_response("Email not verified", 400)
-
                 self.users_collection.delete_one({"username": current_user})
                 self.check_email_collection.delete_one({"email": email})
 
@@ -1024,9 +1171,10 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
         
-        @self.app.route('/lectify/ping_check_email_reset_password', methods=['POST'])
+        @self.app.route('/lectify/ping_email_reset_password', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_ping_check_email_reset_password() -> Response:
             try:
@@ -1075,9 +1223,10 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
         
-        @self.app.route('/lectify/pong_verify_email_reset_password', methods=['POST'])
+        @self.app.route('/lectify/pong_email_reset_password', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_pong_verify_email_reset_password() -> Response:
             try:
@@ -1102,7 +1251,7 @@ class Server:
                 validation_error = validate_user_data({
                     "email": email,
                     "token": token,
-                    "password": new_password,
+                    "password": new_password
                 })
 
                 if validation_error:
@@ -1132,7 +1281,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
 
         @self.app.route('/lectify/checkout', methods=['POST'])
         @jwt_required()
@@ -1188,16 +1338,17 @@ class Server:
                     },
 
                     success_url=success_url,
-                    cancel_url=cancel_url,
+                    cancel_url=cancel_url
                 )
             
                 return jsonify({'checkout_url': checkout_session.url}), 200
 
             except Exception:
-                return self.create_error_response(f'An error occurred while processing the request', 500)
+                return self.create_error_response('An error occurred while processing the request', 500)
             
             finally:
-                self.processing_lock.release()
+                if self.processing_lock.locked():
+                    self.processing_lock.release()
 
         @self.app.route('/lectify/webhook', methods=['POST'])
         def lectify_webhook() -> Response:

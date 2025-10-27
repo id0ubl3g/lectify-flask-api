@@ -6,37 +6,49 @@ def init_flasgger(app: Flask) -> None:
         'swagger': '2.0',
         'info': {
             'title': 'Lectify Flask API',
-            'version': '1.0.0',
-            'description': 'AI-powered API to summarize video lectures with detailed insights.'
+            'version': '2.0.0',
+            'description': 'AI-powered Flask API to summarize video lectures with detailed insights.'
         },
-        'basePath': '',
+        'basePath': '/lectify',
+        'securityDefinitions': {
+            'Bearer': {
+                'type': 'apiKey',
+                'in': 'header',
+                'name': 'Authorization',
+                'description': 'JWT Authorization header using the Bearer {token} format.'
+            }
+        },
         'paths': {
-            '/lectify/summarize': {
+            '/summarize': {
                 'post': {
-                    'tags': ['Summarize'],
+                    'tags': ['Video Summarization'],
+                    'summary': 'Generates a summary of a YouTube video in MD or PDF format.',
+                    'security': [{'Bearer': []}],
                     'consumes': ['application/json'],
                     'parameters': [
                         {
                             'name': 'body',
                             'in': 'body',
                             'required': True,
-                            'description': 'JSON payload containing the YouTube URL and desired output format.',
+                            'description': 'Video data and output format.',
                             'schema': {
                                 'type': 'object',
                                 'properties': {
                                     'youtube_url': {
                                         'type': 'string',
-                                        'description': 'The URL of the YouTube video to be summarized.',
-                                        'example': 'https://www.youtube.com/watch?v=iuPrkzJp20I&t=44s'
+                                        'description': 'YouTube video URL.',
+                                        'example': 'https://www.youtube.com/watch?v=iuPrkzJp20I'
                                     },
                                     'output_format': {
                                         'type': 'string',
-                                        'description': 'Desired output format (md or pdf).',
+                                        'enum': ['md', 'pdf'],
+                                        'description': 'Desired output format.',
                                         'example': 'pdf'
                                     },
                                     'language_select': {
                                         'type': 'string',
-                                        'description': 'Desired language for summarization (pt-BR or en-US).',
+                                        'enum': ['pt-BR', 'en-US'],
+                                        'description': 'Language for recognition and summarization.',
                                         'example': 'pt-BR'
                                     }
                                 },
@@ -46,96 +58,60 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         201: {
-                            'description': 'Document successfully generated and returned.',
+                            'description': 'Document generated successfully.',
                             'schema': {
                                 'type': 'file',
-                                'example': 'Generated document in the requested format.'
+                                'format': 'binary',
+                                'description': 'Downloadable MD or PDF file.'
+                            }
+                        },
+                        401: {
+                            'description': 'Unauthorized (invalid JWT token).'
+                        },
+                        400: {
+                            'description': 'Invalid request.',
+                            'examples': {
+                                'no_data': {'error': 'No data provided'},
+                                'missing_fields': {'error': 'Missing required fields: youtube_url, output_format'},
+                                'missing_url': {'error': 'Missing YouTube URL'},
+                                'url_too_long': {'error': 'URL exceeds maximum length of 200 characters'},
+                                'invalid_url': {'error': 'Invalid YouTube URL'},
+                                'missing_format': {'error': 'Missing output format'},
+                                'invalid_format': {'error': 'Invalid format. Supported formats: md, pdf'},
+                                'missing_language': {'error': 'Missing language selection'},
+                                'invalid_language': {'error': 'Invalid format. Supported formats: pt-BR, en-US'},
+                                'download_error': {'error': 'Download error occurred. Please check the URL and your network connection'},
+                                'network_error': {'error': 'Network error. Please check your internet connection'},
+                                'audio_download_error': {'error': 'Error during audio downloading'},
+                                'audio_recognition_error': {'error': 'Error during audio recognition'},
+                                'chat_generation_error': {'error': 'Error during chat generation'},
+                                'document_building_error': {'error': 'Error during document building'},
+                                'os_error': {'error': 'OS error occurred while handling the file'},
+                                'conversion_error': {'error': 'Error during document conversion'},
+                                'file_not_found': {'error': 'File not found'}
                             }
                         },
                         429: {
-                            'description': 'Server busy',
+                            'description': 'Too many requests or server busy.',
                             'examples': {
-                                'Server busy': {
-                                    'error': 'Server busy. Please try again shortly.'
-                            }
-                        }
-                    },
-                        400: {
-                            'description': 'Bad request due to specific errors.',
-                            'examples': {
-                                'No data provided': {
-                                    'error': 'No data provided'
-                                },
-                                'Missing required fields': {
-                                    'error': 'Missing required fields: {missing_fields_str}'
-                                },
-                                'Missing YouTube URL': {
-                                    'error': 'Missing YouTube URL'
-                                },
-                                'URL exceeds maximum length': {
-                                    'error': 'URL exceeds maximum length of {self.max_url_length} characters'
-                                },
-                                'Invalid YouTube URL': {
-                                    'error': 'Invalid YouTube URL'
-                                },
-                                'Unsupported format': {
-                                    'error': 'Invalid format. Supported formats: {", ".join(self.valid_formats)}'
-                                },
-                                'Missing language selection': {
-                                    'error': 'Missing language selection'
-                                },
-                                'Invalid language': {
-                                    'error': 'Invalid format. Supported formats: {", ".join(self.valid_languages_formats)}'
-                                },
-                                'File not found': {
-                                    'error': 'File not found'
-                                },
-                                'Document conversion error': {
-                                    'error': 'Error during document conversion'
-                                },
-                                'OS error': {
-                                    'error': 'OS error occurred while handling the file'
-                                },
-                                'Document building error': {
-                                    'error': 'Error during document building'
-                                },
-                                'Chat generation error': {
-                                    'error': 'Error during chat generation'
-                                },
-                                'Unable to understand the audio': {
-                                    'error': 'Unable to understand the audio'
-                                },
-                                'Service request error': {
-                                    'error': 'Error in service request'
-                                },
-                                'Audio recognition error': {
-                                    'error': 'Error during audio recognition'
-                                },
-                                'Download error': {
-                                    'error': 'Download error occurred. Please check the URL and your network connection'
-                                },
-                                'Network error': {
-                                    'error': 'Network error. Please check your internet connection'
-                                },
-                                'Audio downloading error': {
-                                    'error': 'Error during audio downloading'
-                                }
+                                'busy': {'error': 'Server busy. Please try again shortly'},
+                                'rate_limit': {'error': 'Too many requests. Please try again later.'},
+                                'monthly_limit': {'error': 'Monthly limit exceeded or you are making too many requests. Please try again later.'},
+                                'blocked': {'error': 'You have been temporarily blocked due to repeated rate limit violations. Please try again in X minute(s).'}
                             }
                         },
                         500: {
                             'description': 'Internal server error.',
-                            'examples': {
-                                'Processing error': {
-                                    'error': 'An error occurred while processing the request'
-                                }
-                            }
+                            'examples': {'error': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
             },
-            '/lectify/questions': {
+            '/questions': {
                 'post': {
-                    'tags': ['Questions'],
+                    'tags': ['Question Generation'],
+                    'summary': 'Generates questions from an MD or PDF file.',
+                    'security': [{'Bearer': []}],
                     'consumes': ['multipart/form-data'],
                     'parameters': [
                         {
@@ -143,104 +119,708 @@ def init_flasgger(app: Flask) -> None:
                             'in': 'formData',
                             'type': 'file',
                             'required': True,
-                            'description': 'The file to be processed for generating questions.',
+                            'description': 'MD or PDF file for analysis.'
                         }
                     ],
                     'responses': {
                         200: {
-                            'description': 'Questions successfully generated from the file.',
+                            'description': 'Questions generated successfully.',
                             'schema': {
                                 'type': 'object',
                                 'properties': {
-                                    'questão1': {
+                                    'questao1': {
                                         'type': 'array',
                                         'items': {
                                             'type': 'object',
                                             'properties': {
-                                                'pergunta': {
-                                                    'type': 'string',
-                                                    'example': 'Qual a afirmação correta sobre a Primeira Lei de Newton (Princípio da Inércia)?'
-                                                },
+                                                'pergunta': {'type': 'string', 'example': 'What is the correct statement about Newton\'s First Law?'},
                                                 'alternativas': {
                                                     'type': 'array',
-                                                    'items': {
-                                                        'type': 'string',
-                                                        'example': 'Um corpo em repouso só se move se uma força externa atuar sobre ele.'
-                                                    },
-                                                    'example': [
-                                                        "Um corpo em movimento precisa de uma força contínua para manter sua velocidade.",
-                                                        "Um corpo em repouso só se move se uma força externa atuar sobre ele.",
-                                                        "Um corpo em movimento tende a parar naturalmente, mesmo sem forças externas.",
-                                                        "A velocidade de um corpo em movimento sempre aumenta com o tempo."
-                                                    ]
+                                                    'items': {'type': 'string'},
+                                                    'example': ['Question A', 'Question B']
                                                 },
-                                                'dica': {
-                                                    'type': 'string',
-                                                    'example': 'Considere o que acontece com um objeto em movimento na ausência de forças externas.'
-                                                },
-                                                'justificativa': {
-                                                    'type': 'string',
-                                                    'example': 'A Primeira Lei de Newton diz que um corpo em repouso ou em movimento mantém seu estado, a menos que uma força externa aja sobre ele.'
-                                                },
-                                                'resposta_correta': {
-                                                    'type': 'string',
-                                                    'example': 'Um corpo em repouso só se move se uma força externa atuar sobre ele.'
-                                                }
+                                                'dica': {'type': 'string', 'example': 'Hint for the answer.'},
+                                                'justificativa': {'type': 'string', 'example': 'Explanation of the correct answer.'},
+                                                'resposta_correta': {'type': 'string', 'example': 'Question B'},
+                                                'Dificuldade': {'type': 'string', 'example': 'Easy'}
                                             }
                                         }
                                     }
                                 }
                             }
                         },
-                        429: {
-                            'description': 'Server busy',
+                        401: {
+                            'description': 'Unauthorized.'
+                        },
+                        400: {
+                            'description': 'Invalid request.',
                             'examples': {
-                                'Server busy': {
-                                    'error': 'Server busy. Please try again shortly.'
+                                'multiple_files': {'error': 'Exactly one file must be uploaded'},
+                                'no_file': {'error': 'No files received'},
+                                'filename_too_long': {'error': 'File name exceeds the maximum length of 200 characters.'},
+                                'invalid_format': {'error': 'Invalid format. Supported formats: md, pdf'},
+                                'suspicious_extension': {'error': 'The filename seems suspicious and contains a blocked extension: .exe'},
+                                'invalid_mime': {'error': 'Invalid file type. Detected: text/plain. Expected: application/pdf'},
+                                'extraction_error': {'error': 'Error during extraction of Markdown text'},
+                                'extraction_pdf_error': {'error': 'Error during extraction of PDF text'},
+                                'chat_generation_error': {'error': 'Error during chat generation'}
+                            }
+                        },
+                        413: {
+                            'description': 'File too large.',
+                            'examples': {'error': {'error': 'File size exceeds the maximum limit of 5 MB.'}}
+                        },
+                        429: {
+                            'description': 'Too many requests.',
+                            'examples': {'error': {'error': 'Too many requests. Please try again later.'}}
+                        },
+                        500: {
+                            'description': 'Internal error.',
+                            'examples': {'error': {'error': 'An error occurred while processing the request'}}
+                        }
+                    }
+                }
+            },
+            '/check_email_register': {
+                'post': {
+                    'tags': ['Authentication'],
+                    'summary': 'Sends verification code via email for registration.',
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'email': {'type': 'string', 'example': 'user@example.com'}
+                                },
+                                'required': ['email']
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Code sent.',
+                            'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Verification code sent to email'}}}
+                        },
+                        400: {
+                            'description': 'Invalid or existing email.',
+                            'examples': {
+                                'missing_email': {'error': 'Email is required'},
+                                'invalid_email': {'error': 'Invalid email format'},
+                                'exists': {'error': 'Email already exists'}
+                            }
+                        },
+                        429: {
+                            'description': 'Rate limit.',
+                            'examples': {'error': {'error': 'Too many requests. Please try again later.'}}
+                        },
+                        500: {
+                            'description': 'Internal error.',
+                            'examples': {'error': {'error': 'An error occurred while processing the request'}}
+                        }
+                    }
+                }
+            },
+            '/verify_email_register': {
+                'post': {
+                    'tags': ['Authentication'],
+                    'summary': 'Verifies email code for registration.',
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'email': {'type': 'string', 'example': 'user@example.com'},
+                                    'code': {'type': 'string', 'example': 'ABC123'}
+                                },
+                                'required': ['email', 'code']
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Email verified.',
+                            'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Email verified successfully'}}}
+                        },
+                        400: {
+                            'description': 'Invalid code or email not found.',
+                            'examples': {
+                                'missing_fields': {'error': 'Email and code are required'},
+                                'invalid_email': {'error': 'Invalid email format'},
+                                'not_found': {'error': 'Email not found'},
+                                'wrong_type': {'error': 'Invalid verification type'},
+                                'invalid_code': {'error': 'Invalid verification code'}
+                            }
+                        },
+                        404: {
+                            'description': 'Email not found.',
+                            'examples': {'error': {'error': 'Email not found'}}
+                        },
+                        429: {
+                            'description': 'Rate limit.'
+                        },
+                        500: {
+                            'description': 'Internal error.'
+                        }
+                    }
+                }
+            },
+            '/register': {
+                'post': {
+                    'tags': ['Authentication'],
+                    'summary': 'Registers a new user.',
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'username': {'type': 'string', 'example': 'user123'},
+                                    'password': {'type': 'string', 'example': 'password123'},
+                                    'email': {'type': 'string', 'example': 'user@example.com'},
+                                    'firstname': {'type': 'string', 'example': 'John'},
+                                    'lastname': {'type': 'string', 'example': 'Doe'}
+                                },
+                                'required': ['username', 'password', 'email', 'firstname', 'lastname']
+                            }
+                        }
+                    ],
+                    'responses': {
+                        201: {
+                            'description': 'User registered.',
+                            'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'User registered successfully'}}}
+                        },
+                        400: {
+                            'description': 'Invalid or duplicate data.',
+                            'examples': {
+                                'missing_fields': {'error': 'Username, password, email, firstname and lastname are required'},
+                                'exists_username': {'error': 'Username already exists'},
+                                'exists_email': {'error': 'Email already exists'},
+                                'not_verified': {'error': 'Email not verified'}
+                            }
+                        },
+                        429: {
+                            'description': 'Rate limit.'
+                        },
+                        500: {
+                            'description': 'Internal error.'
+                        }
+                    }
+                }
+            },
+            '/login': {
+                'post': {
+                    'tags': ['Authentication'],
+                    'summary': 'Logs in and returns JWT tokens.',
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'username': {'type': 'string', 'example': 'user123'},
+                                    'email': {'type': 'string', 'example': 'user@example.com'},
+                                    'password': {'type': 'string', 'example': 'password123'}
+                                }
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Login successful.',
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'access_token': {'type': 'string'},
+                                    'refresh_token': {'type': 'string'}
                                 }
                             }
                         },
                         400: {
-                            'description': 'Bad request due to specific errors.',
+                            'description': 'Invalid credentials.',
                             'examples': {
-                                'No file received': {
-                                    'error': 'No file received'
-                                },
-                                "File exceeds maximum length": {
-                                    'error ': 'File name exceeds the maximum length of 100 characters'
-                                },
-                                'Invalid format': {
-                                    'error': 'Invalid format. Supported formats: {", ".join(self.valid_formats)}'
-                                },
-                                'Suspicious file name': {
-                                    'error': 'The filename seems suspicious and contains a blocked extension: {extensions}'
-                                },
-                                'Invalid file type': {
-                                    'error': 'Invalid file type. Detected: {detected_mime_type}. Expected: {expected_mime_type}'
-                                },
-                                'Chat generation error': {
-                                    'error': 'Error during chat generation'
-                                },
-                                'Extraction error': {
-                                    'error': 'Error during text extraction from the file'
+                                'invalid_email': {'error': 'Invalid email format'},
+                                'missing_password': {'error': 'Password is required'},
+                                'missing_creds': {'error': 'You must provide either a username or an email'}
+                            }
+                        },
+                        401: {
+                            'description': 'Incorrect credentials.',
+                            'examples': {'error': {'error': 'Invalid email or password'}}
+                        },
+                        404: {
+                            'description': 'User not found.',
+                            'examples': {'error': {'error': 'User not found'}}
+                        },
+                        429: {
+                            'description': 'Rate limit.'
+                        },
+                        500: {
+                            'description': 'Internal error.'
+                        }
+                    }
+                }
+            },
+            '/profile': {
+                'get': {
+                    'tags': ['User Profile'],
+                    'summary': 'Returns user profile data.',
+                    'security': [{'Bearer': []}],
+                    'responses': {
+                        200: {
+                            'description': 'Profile loaded.',
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'username': {'type': 'string'},
+                                    'email': {'type': 'string'},
+                                    'firstname': {'type': 'string'},
+                                    'lastname': {'type': 'string'},
+                                    'is_free': {'type': 'boolean'},
+                                    'created_at': {'type': 'string', 'format': 'date-time'},
+                                    'plan': {'type': 'string'},
+                                    'subscription_end': {'type': 'string', 'format': 'date-time'}
                                 }
                             }
                         },
-                        413: {
-                            'description': 'Payload Too Large - File size exceeds the maximum allowed limit.',
-                            'examples': {
-                                'File size exceeds 5MB': {
-                                    'error': 'File size exceeds the maximum limit of 5 MB'
+                        401: {
+                            'description': 'Unauthorized.'
+                        },
+                        404: {
+                            'description': 'User not found.',
+                            'examples': {'error': {'error': 'User not found'}}
+                        },
+                        429: {
+                            'description': 'Rate limit.'
+                        },
+                        500: {
+                            'description': 'Internal error.'
+                        }
+                    }
+                }
+            },
+            '/refresh_token': {
+                'post': {
+                    'tags': ['Authentication'],
+                    'summary': 'Refreshes access token using refresh token.',
+                    'security': [{'Bearer': []}],
+                    'responses': {
+                        200: {
+                            'description': 'Token refreshed.',
+                            'schema': {'type': 'object', 'properties': {'access_token': {'type': 'string'}}}
+                        },
+                        401: {
+                            'description': 'Unauthorized.'
+                        },
+                        404: {
+                            'description': 'User not found.'
+                        },
+                        429: {
+                            'description': 'Rate limit.'
+                        },
+                        500: {
+                            'description': 'Internal error.'
+                        }
+                    }
+                }
+            },
+            '/update_profile': {
+                'patch': {
+                    'tags': ['User Profile'],
+                    'summary': 'Updates user profile (name or password).',
+                    'security': [{'Bearer': []}],
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'firstname': {'type': 'string', 'example': 'John'},
+                                    'lastname': {'type': 'string', 'example': 'Doe'},
+                                    'password': {'type': 'string', 'example': 'newpassword123'}
                                 }
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Profile updated.',
+                            'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Profile updated successfully'}}}
+                        },
+                        400: {
+                            'description': 'Empty or invalid fields.',
+                            'examples': {
+                                'empty_firstname': {'error': 'Firstname cannot be empty'},
+                                'empty_lastname': {'error': 'Lastname cannot be empty'},
+                                'empty_password': {'error': 'Password cannot be empty'},
+                                'same_firstname': {'error': 'Firstname is the same as the current one'},
+                                'same_lastname': {'error': 'Lastname is the same as the current one'},
+                                'no_fields': {'error': 'No fields to update'}
+                            }
+                        },
+                        401: {
+                            'description': 'Unauthorized.'
+                        },
+                        404: {
+                            'description': 'User not found.'
+                        },
+                        429: {
+                            'description': 'Rate limit.'
+                        },
+                        500: {
+                            'description': 'Internal error.'
+                        }
+                    }
+                }
+            },
+            '/update_image_profile': {
+                'put': {
+                    'tags': ['User Profile'],
+                    'summary': 'Updates or removes user profile image.',
+                    'security': [{'Bearer': []}],
+                    'consumes': ['multipart/form-data'],
+                    'parameters': [
+                        {
+                            'name': 'file',
+                            'in': 'formData',
+                            'type': 'file',
+                            'required': False,
+                            'description': 'Image file to upload (optional; if not provided, removes existing image).'
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Profile image updated or removed successfully.',
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'message': {'type': 'string', 'example': 'Profile image updated successfully'},
+                                    'image_profile': {'type': 'string', 'example': 'https://cloudinary.com/'}
+                                }
+                            },
+                            'examples': {
+                                'removed': {'message': 'Profile image removed successfully'}
+                            }
+                        },
+                        400: {
+                            'description': 'Invalid format or suspicious file.',
+                            'examples': {
+                                'multiple_files': {'error': 'Exactly one file must be uploaded'},
+                                'no_image_to_remove': {'error': 'No profile image to remove'},
+                                'invalid_format': {'error': 'Invalid format. Supported formats: png, jpg, jpeg, bmp, tiff, svg, webp, heic, heif'},
+                                'suspicious_extension': {'error': 'The filename seems suspicious and contains a blocked extension: .exe'},
+                                'invalid_mime': {'error': 'Invalid file type. Detected: application/octet-stream. Expected: image/jpeg'}
+                            }
+                        },
+                        401: {
+                            'description': 'Unauthorized.'
+                        },
+                        404: {
+                            'description': 'User not found.',
+                            'examples': {'error': {'error': 'User not found'}}
+                        },
+                        413: {
+                            'description': 'File too large.',
+                            'examples': {'error': {'error': 'File size exceeds the maximum limit of 5 MB.'}}
+                        },
+                        429: {
+                            'description': 'Server busy or too many requests.',
+                            'examples': {
+                                'busy': {'error': 'Server busy. Please try again shortly'},
+                                'rate_limit': {'error': 'Too many requests. Please try again later.'}
                             }
                         },
                         500: {
                             'description': 'Internal server error.',
-                            'examples': {
-                                'Processing error': {
-                                    'error': 'An error occurred while processing the request'
-                                }
+                            'examples': {'error': {'error': 'An error occurred while processing the request'}}
+                        }
+                    }
+                }
+            },
+            '/ping_email_delete_account': {
+                'post': {
+                    'tags': ['Account Deletion'],
+                    'summary': 'Sends verification link via email for account deletion.',
+                    'security': [{'Bearer': []}],
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'base_url': {'type': 'string', 'example': 'https://lectify.vercel.app'},
+                                    'reset_password_page_url': {'type': 'string', 'example': 'delete-account'}
+                                },
+                                'required': ['base_url', 'reset_password_page_url']
                             }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Verification link sent.',
+                            'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Verification code sent to email'}}}
+                        },
+                        400: {
+                            'description': 'Missing required fields.',
+                            'examples': {'error': {'error': 'Base URL and Reset Password Page URL are required'}}
+                        },
+                        401: {
+                            'description': 'Unauthorized.'
+                        },
+                        404: {
+                            'description': 'User not found.',
+                            'examples': {'error': {'error': 'User not found'}}
+                        },
+                        429: {
+                            'description': 'Rate limit or server busy.',
+                            'examples': {
+                                'busy': {'error': 'Server busy. Please try again shortly'},
+                                'rate_limit': {'error': 'Too many requests. Please try again later.'}
+                            }
+                        },
+                        500: {
+                            'description': 'Internal error.',
+                            'examples': {'error': {'error': 'An error occurred while processing the request'}}
+                        }
+                    }
+                }
+            },
+            '/pong_email_delete_account': {
+                'delete': {
+                    'tags': ['Account Deletion'],
+                    'summary': 'Verifies token and deletes user account.',
+                    'security': [{'Bearer': []}],
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'token': {'type': 'string', 'example': 'abc123def456'}
+                                },
+                                'required': ['token']
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Account deleted.',
+                            'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Account deleted successfully'}}}
+                        },
+                        400: {
+                            'description': 'Invalid token or verification.',
+                            'examples': {
+                                'missing_token': {'error': 'Token is required'},
+                                'not_found': {'error': 'Email not found'},
+                                'wrong_type': {'error': 'Invalid verification type'},
+                                'invalid_token': {'error': 'Invalid verification token'}
+                            }
+                        },
+                        401: {
+                            'description': 'Unauthorized.'
+                        },
+                        404: {
+                            'description': 'User not found.',
+                            'examples': {'error': {'error': 'User not found'}}
+                        },
+                        429: {
+                            'description': 'Rate limit or server busy.',
+                            'examples': {
+                                'busy': {'error': 'Server busy. Please try again shortly'},
+                                'rate_limit': {'error': 'Too many requests. Please try again later.'}
+                            }
+                        },
+                        500: {
+                            'description': 'Internal error.',
+                            'examples': {'error': {'error': 'An error occurred while processing the request'}}
+                        }
+                    }
+                }
+            },
+            '/ping_email_reset_password': {
+                'post': {
+                    'tags': ['Password Reset'],
+                    'summary': 'Sends password reset link via email.',
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'email': {'type': 'string', 'example': 'user@example.com'},
+                                    'base_url': {'type': 'string', 'example': 'https://lectify.vercel.app'},
+                                    'reset_password_page_url': {'type': 'string', 'example': 'reset-password'}
+                                },
+                                'required': ['email', 'base_url', 'reset_password_page_url']
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Link sent.',
+                            'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Verification sent to email'}}}
+                        },
+                        400: {
+                            'description': 'Missing data.',
+                            'examples': {'error': {'error': 'Email, Base URL and Reset Password Page URL are required'}}
+                        },
+                        404: {
+                            'description': 'Email not found.',
+                            'examples': {'error': {'error': 'Email not found'}}
+                        },
+                        429: {
+                            'description': 'Rate limit.'
+                        },
+                        500: {
+                            'description': 'Internal error.'
+                        }
+                    }
+                }
+            },
+            '/pong_email_reset_password': {
+                'post': {
+                    'tags': ['Password Reset'],
+                    'summary': 'Verifies token and updates password.',
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'email': {'type': 'string', 'example': 'user@example.com'},
+                                    'token': {'type': 'string', 'example': 'abc123def456'},
+                                    'new_password': {'type': 'string', 'example': 'newPassword123'}
+                                },
+                                'required': ['email', 'token', 'new_password']
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Password updated.',
+                            'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Password reset successfully'}}}
+                        },
+                        400: {
+                            'description': 'Invalid data.',
+                            'examples': {
+                                'missing': {'error': 'Email, Token, and new password are required'},
+                                'not_found': {'error': 'Email not found'},
+                                'wrong_type': {'error': 'Invalid verification type'},
+                                'invalid_token': {'error': 'Invalid verification Token'}
+                            }
+                        },
+                        404: {
+                            'description': 'Email not found.',
+                            'examples': {'error': {'error': 'Email not found'}}
+                        },
+                        429: {
+                            'description': 'Rate limit.'
+                        },
+                        500: {
+                            'description': 'Internal error.'
+                        }
+                    }
+                }
+            },
+            '/checkout': {
+                'post': {
+                    'tags': ['Payments'],
+                    'summary': 'Creates Stripe checkout session for paid plan.',
+                    'security': [{'Bearer': []}],
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'plan': {'type': 'string', 'enum': ['1_month', '6_months', '1_year'], 'example': '1_month'},
+                                    'success_url': {'type': 'string', 'example': 'https://lectify.vercel.app/success'},
+                                    'cancel_url': {'type': 'string', 'example': 'https://lectify.vercel.app/cancel'}
+                                },
+                                'required': ['plan', 'success_url', 'cancel_url']
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Session created.',
+                            'schema': {'type': 'object', 'properties': {'checkout_url': {'type': 'string'}}}
+                        },
+                        400: {
+                            'description': 'Invalid plan or user already paid.',
+                            'examples': {
+                                'missing_plan': {'error': 'Plan is required'},
+                                'invalid_plan': {'error': 'Plan is required'},
+                                'already_paid': {'error': 'User already has a paid plan'},
+                                'missing_urls': {'error': 'Success and cancel URLs are required'}
+                            }
+                        },
+                        401: {
+                            'description': 'Unauthorized.'
+                        },
+                        404: {
+                            'description': 'User not found.'
+                        },
+                        429: {
+                            'description': 'Rate limit.'
+                        },
+                        500: {
+                            'description': 'Internal error.'
+                        }
+                    }
+                }
+            },
+            '/webhook': {
+                'post': {
+                    'tags': ['Payments'],
+                    'summary': 'Stripe webhook to process payments (internal).',
+                    'consumes': ['application/json'],
+                    'parameters': [],
+                    'responses': {
+                        200: {
+                            'description': 'Processed successfully.',
+                            'schema': {'type': 'object', 'properties': {'status': {'type': 'string', 'example': 'success'}}}
+                        },
+                        400: {
+                            'description': 'Invalid payload or signature.',
+                            'examples': {
+                                'invalid_payload': {'error': 'Invalid payload'},
+                                'invalid_sig': {'error': 'Invalid signature'}
+                            }
+                        },
+                        500: {
+                            'description': 'Internal error.'
                         }
                     }
                 }
