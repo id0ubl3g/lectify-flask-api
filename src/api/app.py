@@ -51,7 +51,7 @@ class Server:
         self.app.config['JWT_SECRET_KEY'] = os.getenv('jwt_secret_key')
         self.app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=15)
         self.app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
-        self.app.config['RATELIMIT_STORAGE_URI'] = os.getenv("redis://localhost:6379")
+        self.app.config['RATELIMIT_STORAGE_URI'] = os.getenv("redis_url")
 
         stripe.api_key = os.getenv('stripe_api_key')
         self.stripe_webhook_secret = os.getenv('stripe_webhook_secret')
@@ -94,13 +94,6 @@ class Server:
         )
 
         self.processing_lock = Lock()
-        
-        # CORS(
-        #     self.app,
-        #     origins=["https://lectify.vercel.app"],
-        #     allow_headers=["Content-Type", "Authorization"],
-        #     methods=["GET", "POST", "PUT", "PATCH", "DELETE"]
-        # )
 
         CORS(
             self.app,
@@ -166,13 +159,14 @@ class Server:
         self.youtube_regex = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
         self.max_url_length: int = 200
 
-        self.prompt: str = prompt_summarize
-
         self.relative_path_audio_webm: str = None
         self.relative_path_audio_mp3: str = None
 
         self._register_routes()
         init_flasgger(self.app)
+
+    def create_error_response(self, message: str, code: int) -> Response:
+        return jsonify({'error': message}), code
 
     def get_user(self, username) -> dict | None:
         return self.users_collection.find_one({"username": username})
@@ -261,9 +255,6 @@ class Server:
         
         return None
 
-    def create_error_response(self, message: str, code: int) -> Response:
-        return jsonify({'error': message}), code
-
     def _register_routes(self) -> None:
         @self.app.errorhandler(429)
         def ratelimit_error(e) -> Response:
@@ -301,7 +292,7 @@ class Server:
 
         @self.app.route('/lectify/summarize', methods=['POST'])
         @jwt_required()
-        @self.limiter.limit(lambda: self.dynamic_limit())
+        # @self.limiter.limit(lambda: self.dynamic_limit())
         def lectify_summarize() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
@@ -387,7 +378,7 @@ class Server:
                     try:
                         response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio, self.language_select)
                         data_value_audio_recognition = response_audio_recognition['data']
-                        merged_prompt = f'{self.prompt}\n{data_value_audio_recognition}'
+                        merged_prompt = f'{prompt_summarize}\n{data_value_audio_recognition}'
                         
                         try:
                             response_generative_ai = GenerativeAI().start_chat(merged_prompt)
@@ -457,7 +448,7 @@ class Server:
         
         @self.app.route('/lectify/questions', methods=['POST'])
         @jwt_required()
-        @self.limiter.limit(lambda: self.dynamic_limit())
+        # @self.limiter.limit(lambda: self.dynamic_limit())
         def lectify_questions() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
