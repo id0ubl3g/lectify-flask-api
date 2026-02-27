@@ -25,7 +25,7 @@ class GenerativeAI:
         
     def _initialize_model(self) -> genai.GenerativeModel:
         return genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name="gemini-2.5-flash",
             generation_config=self.generation_config
         )
 

@@ -1,7 +1,5 @@
 from src.utils.return_responses import create_success_return_response
 
-from config.headers_config import user_agents, accept_languages
-
 import yt_dlp
 import random
 import uuid
@@ -15,7 +13,7 @@ class AudioDownloader:
 
         self.ydl_opts: dict[str, object] = {
             'format': 'bestaudio/best',
-            'outtmpl': f'{self.output_path}/%(title)s ({uuid.uuid4().hex}) (Lectify)',
+            'outtmpl': f'{self.output_path}/%(title)s ({uuid.uuid4().hex}) (Lectify).%(ext)s',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -60,22 +58,8 @@ class AudioDownloader:
                 '-t', '00:03:00'
             ]
 
-        ydl_opts['http_headers'] = {
-            'User-Agent': random.choice(user_agents), 
-            "Accept-Language": random.choice(accept_languages),
-            "Referer": "https://www.youtube.com/",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-User": "?1"
-        }
-
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             extract = ydl.extract_info(youtube_url, download=True)  
             audio_file_path = ydl.prepare_filename(extract).replace('.webm', '.mp3')
 
-            return create_success_return_response('Sucessfully downloaded', f'{audio_file_path}.mp3')
+            return create_success_return_response('Sucessfully downloaded',audio_file_path)

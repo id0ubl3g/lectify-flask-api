@@ -219,8 +219,6 @@ class Server:
                     return identity
                 
             except Exception:
-                pass
-            
                 endpoint = request.endpoint
                 if endpoint not in ('lectify_summarize', 'lectify_questions'):
                     return get_remote_address()
@@ -292,7 +290,7 @@ class Server:
 
         @self.app.route('/lectify/summarize', methods=['POST'])
         @jwt_required()
-        # @self.limiter.limit(lambda: self.dynamic_limit())
+        @self.limiter.limit(lambda: self.dynamic_limit())
         def lectify_summarize() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
@@ -381,7 +379,7 @@ class Server:
                         merged_prompt = f'{prompt_summarize}\n{data_value_audio_recognition}'
                         
                         try:
-                            response_generative_ai = GenerativeAI().start_chat(merged_prompt)
+                            response_generative_ai = GenerativeAI().start_chat(json.dumps(merged_prompt))
                             
                             try:
                                 DocumentBuilder().build_document(response_generative_ai['data'], relative_path_markdown)
@@ -448,7 +446,7 @@ class Server:
         
         @self.app.route('/lectify/questions', methods=['POST'])
         @jwt_required()
-        # @self.limiter.limit(lambda: self.dynamic_limit())
+        @self.limiter.limit(lambda: self.dynamic_limit())
         def lectify_questions() -> Response:
             try:
                 if not self.processing_lock.acquire(blocking=False):
@@ -519,7 +517,7 @@ class Server:
                             merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_markdown}'
                             
                             try:
-                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
+                                response_generative_ai = GenerativeAI().start_chat(json.dumps(merged_prompt_questions))
 
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
                                 
@@ -538,13 +536,13 @@ class Server:
                             merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_pdf}'
                             
                             try:
-                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
+                                response_generative_ai = GenerativeAI().start_chat(json.dumps(merged_prompt_questions))
 
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
                                 return jsonify(response_generative_ai_json), 200
 
                             except Exception:
-                                return self.create_error_response(f"Error during chat generation", 400)
+                                return self.create_error_response("eError during chat generation", 400)
 
                         except Exception:
                             return self.create_error_response('Error during extraction of PDF text', 400)
