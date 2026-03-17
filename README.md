@@ -13,10 +13,11 @@
 
 ## Table of Contents
 - [Overview](#overview)
+- [Features](#features)
 - [Project Structure](#project-structure)
 - [Prerequisites](#prerequisites)
-- [Setting Up Docker](#setting-up-docker)
-- [Build and Run with Docker Compose](#build-and-run-with-docker-compose)
+- [Manual Installation (Ubuntu/Debian)](#manual-installation-ubuntudebian)
+- [Running the Application](#running-the-application)
 - [API Documentation](#api-documentation)
 - [API Endpoints](#api-endpoints)
   - [1. Lectify Summarize Endpoint](#1-lectify-summarize-endpoint)
@@ -35,12 +36,20 @@
   - [14. Pong Email Reset Password Endpoint](#14-pong-email-reset-password-endpoint)
   - [15. Checkout Endpoint](#15-checkout-endpoint)
   - [16. Webhook Endpoint](#16-webhook-endpoint)
-- [Example Use Case](#example-use-case)
-- [Acknowledgments](#acknowledgments)
 - [License](#license)
 
 ## Overview
 The Lectify Flask API is a web application developed with Flask, designed to summarize video lectures with detailed insights and generate quiz questions from the provided document. It offers a comprehensive tool for educators and learners to extract key information and test understanding through automatic question generation.
+
+## Features
+- YouTube video transcription + AI summarization (supports pt-BR and en-US)
+- Automatic quiz generation from PDF/Markdown files
+- JWT-based authentication & refresh tokens
+- Email verification, password reset & account deletion flows
+- Profile management (including image upload via Cloudinary)
+- Stripe subscription integration (monthly, 6 months, yearly plans)
+- Rate limiting & Redis caching
+- Interactive API docs with Flasgger
 
 ## Project Structure
 ```plaintext
@@ -67,43 +76,97 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
     │ └── prompt_config.py
     ├── docs/
     │ └── flasgger.py
-    ├── .dockerignore
     ├── .env.example
     ├── gitignore
-    ├── docker-compose.yml
-    ├── Dockerfile
     ├── README.md
     ├── requirements.txt
     └── run.py
 ```
 
 ## Prerequisites
-To use Docker for containerizing the Lectify Flask API, follow these steps to install Docker on your system.
+To run the Lectify Flask API, use Ubuntu 20.04, 22.04, or 24.04 (or a similar Debian-based system) with Python 3.10 or higher. The environment must include Redis for background tasks, FFmpeg for media processing, and internet access for external services like APIs, email SMTP, and Stripe. Ensure all dependencies are properly installed before running the application.
 
-### Setting Up Docker
-Update your system and install Docker with the following commands:
-```sh
-sudo apt update
-sudo apt install apt-transport-https ca-certificates curl software-properties-common -y
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt update
-sudo apt install docker-ce docker-ce-cli containerd.io -y
-```
-Add your user to the Docker group:
-```sh
-sudo usermod -aG docker $USER
-```
-Run the test container to confirm Docker is working:
-```sh
-docker run hello-world
-```
-For additional information on how to install Docker on your system, visit the official Docker documentation: [Download Docker](https://docs.docker.com/get-docker/)
+### Manual Installation (Ubuntu/Debian)
 
-## Build and Run with Docker Compose
-Instead of manually building and running the container with docker build and docker run, use Docker Compose, as it automatically starts both the server and the Redis service.
+1. Update system & install base dependencies
+
 ```sh
-docker compose up --build -d
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y \
+    python3 python3-venv python3-pip git ffmpeg \
+    libmagic1 file libglib2.0-dev libpango1.0-dev \
+    libpangocairo-1.0-0 libcairo2 libffi-dev shared-mime-info
+```
+2. Install and initialize Redis (official repository)
+
+```sh
+sudo apt install -y lsb-release curl gpg
+
+curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+sudo chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
+
+echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" \
+    | sudo tee /etc/apt/sources.list.d/redis.list
+
+sudo apt update
+sudo apt install -y redis
+```
+Enable and start Redis (auto-start on boot):
+```sh
+sudo systemctl enable redis-server
+sudo systemctl start redis-server
+```
+Verify Redis is running
+```sh
+sudo systemctl status redis-server
+```
+
+4. Clone & prepare project 
+
+```sh
+git clone https://github.com/id0ubl3g/lectify-flask-api.git
+cd lectify-flask-api
+```
+
+5. Create & activate virtual environment
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+6. Install Python dependencies
+
+```sh
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+7. Configure environment variables
+
+```sh
+cp .env.example .env
+```
+Edit .env (use nano .env or your editor) and fill in:
+
+- SECRET_KEY
+- API keys (YouTube, Grok/xAI/OpenAI/Anthropic/Gemini, etc.)
+- Email SMTP settings
+- Stripe keys
+- MongoDB connection
+- Cloudinary (for profile images)
+Base URLs, etc.
+
+## Running the Application
+
+Development mode (with reload):
+```sh
+python3 run.py
+```
+Production mode (recommended – using gunicorn):
+
+```sh
+gunicorn -w 1 -k gthread --threads 2 -b 0.0.0.0:5000 run:app
 ```
 
 ## API Documentation

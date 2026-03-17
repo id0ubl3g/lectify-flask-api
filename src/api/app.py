@@ -542,7 +542,7 @@ class Server:
                                 return jsonify(response_generative_ai_json), 200
 
                             except Exception:
-                                return self.create_error_response("eError during chat generation", 400)
+                                return self.create_error_response("Error during chat generation", 400)
 
                         except Exception:
                             return self.create_error_response('Error during extraction of PDF text', 400)
