@@ -513,12 +513,11 @@ class Server:
                     case 'md':
                         try:
                             response_extract_text_markdown = ExtractText().extract_text_markdown(self.filepath_secure)
-                            data_value_extract_text_markdown = response_extract_text_markdown['data']
-                            merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_markdown}'
+                            data_value_extract_text_markdown = (response_extract_text_markdown.get('data') or '')[:1000]
+                            merged_prompt_questions = rf'{prompt_questions}{data_value_extract_text_markdown}'
                             
                             try:
                                 response_generative_ai = GenerativeAI().start_chat(json.dumps(merged_prompt_questions))
-
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
                                 
                                 return jsonify(response_generative_ai_json), 200
@@ -532,17 +531,17 @@ class Server:
                     case 'pdf':
                         try:
                             response_extract_text_pdf = ExtractText().extract_text_pdf(self.filepath_secure)
-                            data_value_extract_text_pdf = response_extract_text_pdf['data']
-                            merged_prompt_questions = f'{prompt_questions}\n{data_value_extract_text_pdf}'
+                            data_value_extract_text_pdf = (response_extract_text_pdf.get('data') or '')[:1000]
+                            merged_prompt_questions = rf'{prompt_questions}{data_value_extract_text_pdf}'
                             
                             try:
                                 response_generative_ai = GenerativeAI().start_chat(json.dumps(merged_prompt_questions))
-
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
+
                                 return jsonify(response_generative_ai_json), 200
 
-                            except Exception:
-                                return self.create_error_response("Error during chat generation", 400)
+                            except Exception as e:
+                                return self.create_error_response(f"{e}Error during chat generation", 400)
 
                         except Exception:
                             return self.create_error_response('Error during extraction of PDF text', 400)

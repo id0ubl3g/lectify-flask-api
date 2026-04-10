@@ -13,7 +13,6 @@ class AudioDownloader:
 
         self.ydl_opts: dict[str, object] = {
             'format': 'bestaudio/best',
-            'outtmpl': f'{self.output_path}/%(title)s ({uuid.uuid4().hex}) (Lectify).%(ext)s',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -29,6 +28,8 @@ class AudioDownloader:
     def download_audio(self, youtube_url: str, user_is_free: bool = True) -> dict:
         time.sleep(random.uniform(1.5, 5.5))
         ydl_opts = self.ydl_opts.copy()
+        file_uuid = uuid.uuid4().hex
+        ydl_opts['outtmpl'] = f'{self.output_path}/%(title)s ({file_uuid}) (Lectify).%(ext)s'
 
         if user_is_free:
             ydl_opts['ratelimit'] = random.randint(150_000, 500_000)
@@ -60,6 +61,7 @@ class AudioDownloader:
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             extract = ydl.extract_info(youtube_url, download=True)  
-            audio_file_path = ydl.prepare_filename(extract).replace('.webm', '.mp3')
+            base = os.path.splitext(ydl.prepare_filename(extract))[0]
+            audio_file_path = f"{base}.mp3"
 
             return create_success_return_response('Sucessfully downloaded',audio_file_path)

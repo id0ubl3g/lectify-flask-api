@@ -14,11 +14,11 @@ class GenerativeAI:
         os.environ["GRPC_VERBOSITY"] = "NONE"
         
         self.generation_config:  dict[str, float | int | str] = {
-                    "temperature": 0.2,
+                    "temperature": 0.0,
                     "top_p": 0.9,
                     "top_k": 40,
-                    "max_output_tokens": 2048,
-                    "response_mime_type": "text/plain",
+                    "max_output_tokens": 800,
+                    "response_mime_type": "application/json",
                 }
         
         self.model: genai.GenerativeModel = self._initialize_model()
