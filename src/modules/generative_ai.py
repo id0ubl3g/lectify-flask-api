@@ -14,11 +14,10 @@ class GenerativeAI:
         os.environ["GRPC_VERBOSITY"] = "NONE"
         
         self.generation_config:  dict[str, float | int | str] = {
-                    "temperature": 0.0,
+                    "temperature": 0,
                     "top_p": 0.9,
                     "top_k": 40,
-                    "max_output_tokens": 800,
-                    "response_mime_type": "application/json",
+                    "response_mime_type": "text/plain"
                 }
         
         self.model: genai.GenerativeModel = self._initialize_model()
@@ -32,5 +31,5 @@ class GenerativeAI:
     def start_chat(self, input_text: str) -> dict:
         chat_session = self.model.start_chat(history=[])
         response_generative_ai = chat_session.send_message(input_text)
-        
+        print(response_generative_ai.usage_metadata)
         return create_success_return_response(f'Successfully processed the Generative AI response', response_generative_ai.text)

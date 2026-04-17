@@ -157,6 +157,20 @@ Edit .env (use nano .env or your editor) and fill in:
 - Cloudinary (for profile images)
 Base URLs, etc.
 
+To enable the Speech-to-Text feature, it is required to configure the Google Cloud service account JSON file.
+
+Place the file inside the config/ directory:
+
+```
+config/google_credentials.json
+```
+
+Then set the environment variable pointing to this file:
+
+```sh
+path_google_application_credentials_json=config/google_credentials.json
+```
+
 ## Running the Application
 
 Development mode (with reload):
@@ -371,6 +385,12 @@ curl -X POST "http://127.0.0.1:5000/lectify/questions" -H "Authorization: Bearer
     ```
     ```json
     {"error": "Invalid file type. Detected: text/plain. Expected: application/pdf"}
+    ```
+    ```json
+    {"error": "No extractable text found in the Markdown file"}
+    ```
+    ```json
+    {"error": "No extractable text found in the PDF"}
     ```
     ```json
     {"error": "Error during extraction of Markdown text"}

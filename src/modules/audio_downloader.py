@@ -16,13 +16,14 @@ class AudioDownloader:
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': '0'
+                'preferredquality': '128'
             }],
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
             "sleep_requests": True,
-            "fragment_retries": 3
+            "fragment_retries": 3,
+
         }
 
     def download_audio(self, youtube_url: str, user_is_free: bool = True) -> dict:

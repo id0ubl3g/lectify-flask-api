@@ -10,7 +10,7 @@ load_dotenv()
 
 class AudioRecognition:
     def __init__(self):
-        credentials = service_account.Credentials.from_service_account_file(os.getenv('path_google_applicantion_credentials_json'))
+        credentials = service_account.Credentials.from_service_account_file(os.getenv('path_google_application_credentials_json'))
         self.client = speech.SpeechClient(credentials=credentials)
 
     def recognize_audio(self, audio_path: str, language_select: str) -> dict:

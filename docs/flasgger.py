@@ -161,6 +161,8 @@ def init_flasgger(app: Flask) -> None:
                                 'invalid_format': {'error': 'Invalid format. Supported formats: md, pdf'},
                                 'suspicious_extension': {'error': 'The filename seems suspicious and contains a blocked extension: .exe'},
                                 'invalid_mime': {'error': 'Invalid file type. Detected: text/plain. Expected: application/pdf'},
+                                'no_extractable_text_markdown': {'error': 'No extractable text found in the Markdown file'},
+                                'no_extractable_text_pdf': {'error': 'No extractable text found in the PDF'},
                                 'extraction_error': {'error': 'Error during extraction of Markdown text'},
                                 'extraction_pdf_error': {'error': 'Error during extraction of PDF text'},
                                 'chat_generation_error': {'error': 'Error during chat generation'}

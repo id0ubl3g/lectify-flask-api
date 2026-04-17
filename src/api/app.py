@@ -376,10 +376,10 @@ class Server:
                     try:
                         response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio, self.language_select)
                         data_value_audio_recognition = response_audio_recognition['data']
-                        merged_prompt = f'{prompt_summarize}\n{data_value_audio_recognition}'
+                        merged_prompt = f'{prompt_summarize}{data_value_audio_recognition}'
                         
                         try:
-                            response_generative_ai = GenerativeAI().start_chat(json.dumps(merged_prompt))
+                            response_generative_ai = GenerativeAI().start_chat(merged_prompt)
                             
                             try:
                                 DocumentBuilder().build_document(response_generative_ai['data'], relative_path_markdown)
@@ -513,11 +513,14 @@ class Server:
                     case 'md':
                         try:
                             response_extract_text_markdown = ExtractText().extract_text_markdown(self.filepath_secure)
-                            data_value_extract_text_markdown = (response_extract_text_markdown.get('data') or '')[:1000]
-                            merged_prompt_questions = rf'{prompt_questions}{data_value_extract_text_markdown}'
+                            data_value_extract_text_markdown = (response_extract_text_markdown.get('data') or '')[:500]
+                            if not data_value_extract_text_markdown.strip():
+                                return self.create_error_response('No extractable text found in the Markdown file', 400)
+                            
+                            merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_markdown}'
                             
                             try:
-                                response_generative_ai = GenerativeAI().start_chat(json.dumps(merged_prompt_questions))
+                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
                                 
                                 return jsonify(response_generative_ai_json), 200
@@ -531,17 +534,20 @@ class Server:
                     case 'pdf':
                         try:
                             response_extract_text_pdf = ExtractText().extract_text_pdf(self.filepath_secure)
-                            data_value_extract_text_pdf = (response_extract_text_pdf.get('data') or '')[:1000]
-                            merged_prompt_questions = rf'{prompt_questions}{data_value_extract_text_pdf}'
+                            data_value_extract_text_pdf = (response_extract_text_pdf.get('data') or '')[:500]
+                            if not data_value_extract_text_pdf.strip():
+                                return self.create_error_response('No extractable text found in the PDF', 400)
+                            
+                            merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_pdf}'
                             
                             try:
-                                response_generative_ai = GenerativeAI().start_chat(json.dumps(merged_prompt_questions))
+                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
 
                                 return jsonify(response_generative_ai_json), 200
 
-                            except Exception as e:
-                                return self.create_error_response(f"{e}Error during chat generation", 400)
+                            except Exception:
+                                return self.create_error_response("Error during chat generation", 400)
 
                         except Exception:
                             return self.create_error_response('Error during extraction of PDF text', 400)
