@@ -72,4 +72,3 @@ def validate_user_data(data: dict) -> str | None:
                 return error_msg
             
     return None
-

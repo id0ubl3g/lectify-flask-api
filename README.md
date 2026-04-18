@@ -150,7 +150,7 @@ cp .env.example .env
 Edit .env (use nano .env or your editor) and fill in:
 
 - SECRET_KEY
-- API keys (YouTube, Grok/xAI/OpenAI/Anthropic/Gemini, etc.)
+- API keys (YouTube, Gemini, etc.)
 - Email SMTP settings
 - Stripe keys
 - MongoDB connection

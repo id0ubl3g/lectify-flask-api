@@ -6,4 +6,3 @@ class DocumentBuilder:
             file.write(data_generative_ai)
         
         return create_success_return_response(f'Markdown document successfully built')
-

@@ -21,4 +21,3 @@ class ExtractText:
                 text += page.extract_text()
 
         return create_success_return_response(f'Text successfully extracted from PDF', text)
-    

@@ -1,6 +1,5 @@
 from flask import json
 
-
 prompt_summarize = """
 Crie um material didático curto em Markdown com base no trecho.
 

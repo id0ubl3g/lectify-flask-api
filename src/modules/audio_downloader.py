@@ -22,8 +22,7 @@ class AudioDownloader:
             'no_warnings': True,
             'noplaylist': True,
             "sleep_requests": True,
-            "fragment_retries": 3,
-
+            "fragment_retries": 3
         }
 
     def download_audio(self, youtube_url: str, user_is_free: bool = True) -> dict:
