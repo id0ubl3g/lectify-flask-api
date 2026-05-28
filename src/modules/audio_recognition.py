@@ -28,6 +28,6 @@ class AudioRecognition:
             audio = speech.RecognitionAudio(content=content)
 
         response_audio_recognized = self.client.recognize(audio=audio, config=config)
-        audio_recognized = " ".join([result.alternatives[0].transcript for result in response_audio_recognized.results])
+        audio_recognized = " ".join([result.alternatives[0].transcript for result in response_audio_recognized.results])[:500]
         
         return create_success_return_response(f'Audio successfully recognized', audio_recognized)

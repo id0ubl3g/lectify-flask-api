@@ -1,42 +1,36 @@
-from src.modules.audio_downloader import AudioDownloader
-from src.modules.audio_recognition import AudioRecognition
 from src.modules.generative_ai import GenerativeAI
-from src.modules.document_builder import DocumentBuilder
-from src.modules.convert_document import ConvertDocument
 from src.modules.extract_text import ExtractText
 
-from config.prompt_config import prompt_summarize, prompt_questions
+from src.rabbitmq.publisher import publish_message
+
+from config.prompt_config import prompt_questions
+from docs.flasgger import init_flasgger
+from config.file_config import *
+from config.input_config import *
+
+from config.providers.initialize_mongodb import initialize_mongodb
+from config.providers.initialize_stripe import initialize_stripe
+from config.providers.initialize_redis  import initialize_redis
+from config.providers.initialize_cloudinary  import initialize_cloudinary
 
 from src.utils.send_email_verification import SendEmailVerification
 from src.utils.system_utils import clean_up, is_valid_email, validate_user_data
 
-from docs.flasgger import init_flasgger
-
 from flask import Flask, request, jsonify, send_file, Response
 from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token, jwt_required, get_jwt_identity, verify_jwt_in_request
 from flask_limiter.util import get_remote_address
-from flask_limiter import Limiter
 from flask_cors import CORS
-
-from pymongo.collection import Collection
-from pymongo import MongoClient
-
-import cloudinary.uploader
-import cloudinary
 
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
-from datetime import datetime, timedelta
+from pymongo.collection import Collection
+from datetime import datetime, timezone,timedelta
 from dotenv import load_dotenv
-from threading import Lock
-from redis import Redis
-import requests
+import cloudinary.uploader
 import secrets
-import yt_dlp
 import string
 import random
 import stripe
-import gridfs
 import magic
 import json
 import os
@@ -48,52 +42,30 @@ class Server:
     def __init__(self) -> None:
         self.app: Flask = Flask(__name__)
 
-        self.app.config['JWT_SECRET_KEY'] = os.getenv('jwt_secret_key')
-        self.app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=15)
+        self.app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY')
+        self.app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
         self.app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
-        self.app.config['RATELIMIT_STORAGE_URI'] = os.getenv("redis_url")
-
-        stripe.api_key = os.getenv('stripe_api_key')
-        self.stripe_webhook_secret = os.getenv('stripe_webhook_secret')
-
-        self.plans: dict[str, str] = {
-            "1_month": os.getenv('stripe_price_1_month'),
-            "6_months": os.getenv('stripe_price_6_months'),
-            "1_year": os.getenv('stripe_price_1_year')
-        }
-
-        self.durations: dict[str, timedelta] = {
-            "1_month": timedelta(days=30),
-            "6_months": timedelta(days=180),
-            "1_year": timedelta(days=365)
-        }
+        self.app.config['RATELIMIT_STORAGE_URI'] = os.getenv("REDIS_URL")
 
         self.jwt: JWTManager = JWTManager(self.app)
-        
-        client = MongoClient(os.getenv('mongodb_key'))
-        db = client['lectify-flask-api']
-        
-        self.grid_fs = gridfs.GridFS(db, collection="documents")
-        self.documents_collection = db["documents.files"]
-        
-        self.check_email_collection: Collection = db["check_email"]
-        self.check_email_collection.create_index("timestamp", expireAfterSeconds=600)
-        self.check_email_collection.create_index("email", unique=True)
-        
-        self.users_collection: Collection = db['users']
-        self.users_collection.create_index("email", unique=True)
-        self.users_collection.create_index("username", unique=True)
 
-        redis_url: str = os.getenv("redis_url")
-        self.redis_client = Redis.from_url(redis_url)
-        self.limiter: Limiter = Limiter(
-            key_func=self.user_or_ip,
-            app=self.app,
-            default_limits=["100 per minute"],
-            storage_uri=redis_url
-        )
+        mongo = initialize_mongodb()
+        stripe = initialize_stripe()
+        redis = initialize_redis(self.app, self.user_or_ip)
+        self.cloudinary = initialize_cloudinary() 
 
-        self.processing_lock = Lock()
+        self.grid_fs = mongo["grid_fs"]
+        self.documents_collection = mongo["documents_collection"]
+        self.check_email_collection: Collection = mongo["check_email_collection"]
+        self.users_collection: Collection = mongo["users_collection"]
+        self.check_summarize_collection: Collection = mongo["check_summarize_collection"]
+
+        self.stripe_webhook_secret = stripe['stripe_webhook_secret']
+        self.durations = stripe['durations']
+        self.plans = stripe['plans']
+
+        self.redis_client = redis["redis_client"]
+        self.limiter = redis["limiter"]
 
         CORS(
             self.app,
@@ -106,61 +78,20 @@ class Server:
         self.output_format: str = None
         self.language_select: str = None
 
-        self.required_fields: list['str'] = ['youtube_url', 'output_format', 'language_select']
-        self.valid_formats: list['str'] = ['pdf', 'md']
-        self.valid_languages_formats: list['str'] = ['pt-BR', 'en-US']
+        self.required_fields: list = REQUIRED_FIELDS
+        self.valid_formats: list= VALID_FORMATS
+        self.valid_languages_formats: list = VALID_LANGUAGE_FORMATS
 
-        self.expected_mime_types: dict[str, str] = {
-            'md': 'text/markdown',
-            'pdf': 'application/pdf'
-        }
+        self.expected_mime_types: dict = EXPECTED_MIME_TYPES
+        self.blocked_extensions: frozenset = BLOCKED_EXTENSIONS
+        self.valid_format_images: list = VALID_FORMAT_IMAGES
+        self.expected_image_mime_types: dict = EXPECTED_IMAGE_MIME_TYPES
 
-        self.blocked_extensions: frozenset[str] = frozenset({
-            '.py', '.sh', '.bat', '.cmd', '.ps1', '.exe', '.js',
-            '.msi', '.vbs', '.wsf', '.jar', '.scr', '.cpl',
-            '.hta', '.wsh', '.scf', '.lnk', '.reg', '.inf',
-            '.iso', '.dmg',
-            '.docm', '.xlsm', '.pptm',
-            '.dotm', '.xltm', '.ppsm',
-            '.odt',                                              
-            '.zip', '.tar', '.tar.gz', '.rar', '.7z',
-            '.apk',
-            '.dll', '.drv', '.vxd', '.sys',
-            '.bak', '.old', '.swp',
-            '.chm', '.mdb', '.sql', '.db'
-        })
-
-        cloudinary.config(
-            cloud_name = os.getenv('cloudinary_name'),
-            api_key = os.getenv('cloudinary_api_key'),
-            api_secret = os.getenv('cloudinary_api_secret'),
-            secure=True
-        )
-
-        self.valid_format_images: list['str'] = ['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'svg', 'webp', 'heic', 'heif']
-
-        self.expected_image_mime_types = {
-            "png": "image/png",
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-            "gif": "image/gif",
-            "bmp": "image/bmp",
-            "tiff": "image/tiff",
-            "svg": "image/svg+xml"
-        }
-
-        self.output_path: str = 'src/temp'
+        self.output_path: str = OUTPUT_PATH
         self.filepath_secure: str = None
-
-        self.relative_path_markdown: str = None
-        self.relative_path_pdf: str = None
-        self.relative_path_audio: str = None
 
         self.youtube_regex = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
         self.max_url_length: int = 200
-
-        self.relative_path_audio_webm: str = None
-        self.relative_path_audio_mp3: str = None
 
         self._register_routes()
         init_flasgger(self.app)
@@ -193,7 +124,7 @@ class Server:
         
         subscription_end = current_user.get('subscription_end', None)
         
-        if subscription_end and datetime.utcnow() < subscription_end:
+        if subscription_end and datetime.now(timezone.utc) < subscription_end:
             if current_user.get('is_free', True):
                 self.users_collection.update_one({"username": username}, {"$set": {"is_free": False}})
             
@@ -263,39 +194,30 @@ class Server:
                 return response_check_and_apply_block
 
             endpoint = request.endpoint
-            if endpoint in ('lectify_summarize', 'lectify_questions') and self.user_is_free(current_user):
-                return self.create_error_response("Monthly limit exceeded or you are making too many requests. Please try again later.", 429)
+
+            if endpoint in ("lectify_summarize", "lectify_questions"):
+                if self.user_is_free(current_user):
+                    return self.create_error_response("Monthly free plan limit exceeded.", 429)
+
+                if not self.user_is_free(current_user):
+                    return self.create_error_response("Monthly subscription limit exceeded.", 429)
 
             return self.create_error_response("Too many requests. Please try again later.", 429)
         
         @self.app.after_request
         def after_request(response) -> Response:
             endpoint = request.endpoint
-            if endpoint == 'lectify_summarize':
-                clean_up(
-                    getattr(self, "relative_path_markdown", None),
-                    getattr(self, "relative_path_pdf", None),
-                    getattr(self, "relative_path_audio", None)
-                )
-                
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
-
             if endpoint == 'lectify_questions':
                 clean_up(getattr(self, "filepath_secure", None))
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
             
             return response
 
         @self.app.route('/lectify/summarize', methods=['POST'])
         @jwt_required()
         @self.limiter.limit(lambda: self.dynamic_limit())
+        @self.limiter.limit("5 per minute")
         def lectify_summarize() -> Response:
             try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
                 current_user = self.user_or_ip()
 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -315,143 +237,163 @@ class Server:
                     missing_fields_str = ', '.join(missing_fields)
                     return self.create_error_response(f"Missing required fields: {missing_fields_str}", 400)
                 
-                self.youtube_url = data.get('youtube_url')
-                self.output_format = data.get('output_format')
-                self.language_select = data.get('language_select')
+                youtube_url = data.get('youtube_url')
+                output_format = data.get('output_format')
+                language_select = data.get('language_select')
                 
-                if not self.youtube_url:
+                if not youtube_url:
                     return self.create_error_response('Missing YouTube URL', 400)
                 
-                if len(self.youtube_url) > self.max_url_length:
+                if len(youtube_url) > self.max_url_length:
                     return self.create_error_response(f'URL exceeds maximum length of {self.max_url_length} characters', 400)
 
-                if not self.youtube_url.startswith("https://"):
-                    self.youtube_url = "https://" + self.youtube_url
+                if not youtube_url.startswith("https://"):
+                    youtube_url = "https://" + youtube_url
 
-                if not re.match(self.youtube_regex, self.youtube_url):
+                if not re.match(self.youtube_regex, youtube_url):
                     return self.create_error_response('Invalid YouTube URL', 400)
                 
-                if not self.output_format:
+                if not output_format:
                     return self.create_error_response('Missing output format', 400)
                 
-                if self.output_format not in self.valid_formats:
+                if output_format not in self.valid_formats:
                     return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_formats)}", 400)
                 
-                if not self.language_select:
+                if not language_select:
                     return self.create_error_response('Missing language selection', 400)
                 
-                if self.language_select not in self.valid_languages_formats:
+                if language_select not in self.valid_languages_formats:
                     return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_languages_formats)}", 400)
                 
-                if not self.user_is_free(current_user):
-                    file_documents_collection = self.documents_collection.find_one({
-                        "youtube_url": self.youtube_url,
-                        "filetype": self.output_format,
-                        "language": self.language_select
-                    })
+                status_check_summarize_collection = self.check_summarize_collection.find_one({
+                    "username": current_user,
+                    "youtube_url": youtube_url,
+                    "language_select": language_select,
+                    "output_format": output_format,
+                    "status": "processing"})
+                
+                if status_check_summarize_collection:
+                    return self.create_error_response("A summarize request is already being processed for this request", 409)
+                
+                file_documents_collection = self.documents_collection.find_one({
+                    "youtube_url": youtube_url,
+                    "filetype": output_format,
+                    "language": language_select,
+                    "username": current_user
+                })
 
-                    if file_documents_collection:
-                        grid_out = self.grid_fs.get(file_documents_collection["_id"])
-                        file_data = grid_out.read()
-                        mimetype = "application/pdf" if self.output_format == "pdf" else "text/markdown"
-                        return Response(
-                                file_data,
-                                mimetype=mimetype,
-                                headers={
-                                    "Content-Disposition": f"attachment; filename={grid_out.filename}"
-                            }
-                        )
+                if file_documents_collection:
+                    grid_out = self.grid_fs.get(file_documents_collection["_id"])
+                    file_data = grid_out.read()
+                    mimetype = "application/pdf" if output_format == "pdf" else "text/markdown"
+                    return Response(
+                            file_data,
+                            mimetype=mimetype,
+                            headers={
+                                "Content-Disposition": f"attachment; filename={grid_out.filename}"
+                        }
+                    )
 
                 try:
-                    response_audio_downloader = AudioDownloader().download_audio(self.youtube_url, lambda: self.user_is_free())
-                    
-                    relative_path_audio = response_audio_downloader['data']
-                    relative_path_markdown = f'{relative_path_audio.replace(".mp3", "")}.md'
-                    relative_path_pdf = f'{relative_path_markdown.replace(".md", "")}.pdf'
-                    
-                    self.relative_path_audio = os.path.abspath(relative_path_audio)
-                    self.relative_path_markdown = os.path.abspath(relative_path_markdown)
-                    self.relative_path_pdf = os.path.abspath(relative_path_pdf)
-                    
-                    try:
-                        response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio, self.language_select)
-                        data_value_audio_recognition = response_audio_recognition['data']
-                        merged_prompt = f'{prompt_summarize}{data_value_audio_recognition}'
-                        
-                        try:
-                            response_generative_ai = GenerativeAI().start_chat(merged_prompt)
-                            
-                            try:
-                                DocumentBuilder().build_document(response_generative_ai['data'], relative_path_markdown)
-                                
-                                try:
-                                    ConvertDocument().markdown_to_pdf(relative_path_markdown, relative_path_pdf)
+                    publish_message(
+                        queue='summarize_queue',
+                        message={
+                            'youtube_url': youtube_url,
+                            'language_select': language_select,
+                            'output_format': output_format,
+                            'username': current_user
+                        }
+                    )
 
-                                    match self.output_format:
-                                        case 'md':
-                                            if not self.user_is_free(current_user):
-                                                with open(self.relative_path_markdown, 'rb') as file:
-                                                    self.grid_fs.put(
-                                                        file, 
-                                                        filename=os.path.basename(self.relative_path_markdown),
-                                                        youtube_url=self.youtube_url,
-                                                        filetype='md',
-                                                        language=self.language_select
-                                                    )
-                                                
-                                            return send_file(self.relative_path_markdown, mimetype='text/markdown', as_attachment=True), 201
-                                        
-                                        case 'pdf':
-                                            if not self.user_is_free(current_user):
-                                                with open(self.relative_path_pdf, 'rb') as file:
-                                                    self.grid_fs.put(
-                                                        file, 
-                                                        filename=os.path.basename(self.relative_path_pdf),
-                                                        youtube_url=self.youtube_url,
-                                                        filetype='pdf',
-                                                        language=self.language_select
-                                                    )
-
-                                            return send_file(self.relative_path_pdf, as_attachment=True), 201
-                                
-                                except FileNotFoundError:
-                                    return self.create_error_response('File not found', 400)
-
-                                except Exception:
-                                    return self.create_error_response('Error during document conversion', 400)
-
-                            except OSError:
-                                return self.create_error_response('OS error occurred while handling the file', 400)
-
-                            except Exception:
-                                return self.create_error_response('Error during document building', 400)
-
-                        except Exception:
-                            return self.create_error_response("Error during chat generation", 400)
-                    
-                    except Exception:
-                        return self.create_error_response('Error during audio recognition', 400)
-
-                except yt_dlp.utils.DownloadError:
-                    return self.create_error_response('Download error occurred. Please check the URL and your network connection', 400)
-        
-                except requests.exceptions.RequestException:
-                    return self.create_error_response('Network error. Please check your internet connection', 400)
+                    return jsonify({"message": "Your request has been successfully placed in the RabbitMQ queue and will be processed shortly"}), 200
 
                 except Exception:
-                    return self.create_error_response('Error during audio downloading', 400)
-
+                    return self.create_error_response('Error during publishing message to queue in summarize', 500)
+                
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
         
+        @self.app.route('/lectify/check_summarize', methods=['POST'])
+        @jwt_required()
+        @self.limiter.limit("5 per minute")
+        def lectify_check_summarize() -> Response:
+            try:
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("Unauthorized", 401)
+                
+                data = request.get_json()
+                
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+                
+                missing_fields = [field for field in self.required_fields if field not in data]
+                if missing_fields:
+                    missing_fields_str = ', '.join(missing_fields)
+                    return self.create_error_response(f"Missing required fields: {missing_fields_str}", 400)
+
+                youtube_url = data.get('youtube_url')
+                output_format = data.get('output_format')
+                language_select = data.get('language_select')
+
+                if not youtube_url:
+                    return self.create_error_response('Missing YouTube URL', 400)
+                
+                if len(youtube_url) > self.max_url_length:
+                    return self.create_error_response(f'URL exceeds maximum length of {self.max_url_length} characters', 400)
+
+                if not youtube_url.startswith("https://"):
+                    youtube_url = "https://" + youtube_url
+
+                if not re.match(self.youtube_regex, youtube_url):
+                    return self.create_error_response('Invalid YouTube URL', 400)
+                
+                if not output_format:
+                    return self.create_error_response('Missing output format', 400)
+                
+                if output_format not in self.valid_formats:
+                    return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_formats)}", 400)
+                
+                if not language_select:
+                    return self.create_error_response('Missing language selection', 400)
+                
+                if language_select not in self.valid_languages_formats:
+                    return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_languages_formats)}", 400)
+                
+                status_check_summarize_collection = self.check_summarize_collection.find_one({
+                    "username": current_user,
+                    "youtube_url": youtube_url,
+                    "language_select": language_select,
+                    "output_format": output_format
+                })
+
+                if not status_check_summarize_collection:
+                    return self.create_error_response('queue is empty, summarize not started', 400)
+                
+                queue_data = {
+                    "username": current_user,
+                    "youtube_url": youtube_url,
+                    "language_select": language_select,
+                    "output_format": output_format,
+                    "status": status_check_summarize_collection['status']
+                }
+
+                return jsonify(queue_data), 200
+
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request', 500)
+
         @self.app.route('/lectify/questions', methods=['POST'])
         @jwt_required()
         @self.limiter.limit(lambda: self.dynamic_limit())
-        def lectify_questions() -> Response:
+        @self.limiter.limit("5 per minute")
+        async def lectify_questions() -> Response:
             try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
                 current_user = self.user_or_ip()
 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -520,7 +462,7 @@ class Server:
                             merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_markdown}'
                             
                             try:
-                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
+                                response_generative_ai = await GenerativeAI().start_chat(merged_prompt_questions)
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
                                 
                                 return jsonify(response_generative_ai_json), 200
@@ -541,7 +483,7 @@ class Server:
                             merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_pdf}'
                             
                             try:
-                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
+                                response_generative_ai = await GenerativeAI().start_chat(merged_prompt_questions)
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
 
                                 return jsonify(response_generative_ai_json), 200
@@ -559,9 +501,6 @@ class Server:
         @self.limiter.limit("5 per minute")
         def lectify_check_email_register() -> Response:
             try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -590,7 +529,7 @@ class Server:
                             "type_verification": "register",
                             "is_verified": False,
                             "code": code,
-                            "timestamp": datetime.utcnow()
+                            "timestamp": datetime.now(timezone.utc)
                         }
                     },
                     upsert=True
@@ -602,18 +541,11 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
         
         @self.app.route('/lectify/verify_email_register', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_verify_email_register() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -657,18 +589,11 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
 
         @self.app.route('/lectify/register', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_register() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -714,7 +639,7 @@ class Server:
                     "firstname": firstname,
                     "lastname": lastname,
                     "is_free": True,
-                    "created_at": datetime.utcnow(),
+                    "created_at": datetime.now(timezone.utc),
                     "image_profile": ""
                 }
 
@@ -726,18 +651,11 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
 
         @self.app.route('/lectify/login', methods=['POST'])
         @self.limiter.limit("10 per minute")
         def lectify_login() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -757,7 +675,7 @@ class Server:
                     return self.create_error_response("Password is required", 400)
 
                 if not username and not email:
-                    return self.create_error_response("You must provide either a email or an email", 400)
+                    return self.create_error_response("You must provide either a username or an email", 400)
                 
                 if email:
                     user_data = self.get_email(email)
@@ -804,18 +722,11 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
         
         @self.app.route('/lectify/profile', methods=['GET'])
-        @jwt_required()        
+        @jwt_required()
         def lectify_profile() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -846,19 +757,12 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
         
         @self.app.route('/lectify/refresh_token', methods=['POST'])
         @jwt_required(refresh=True)
         @self.limiter.limit("5 per minute")
         def lectify_refresh_token() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = get_jwt_identity()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -876,19 +780,12 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
         
         @self.app.route('/lectify/update_profile', methods=['PATCH'])
         @jwt_required()
         @self.limiter.limit("10 per minute")
         def lectify_update_profile() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -949,19 +846,12 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
 
         @self.app.route('/lectify/update_image_profile', methods=['PUT'])
         @jwt_required()
         @self.limiter.limit("10 per minute")
         def lectify_update_image_profile() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -983,7 +873,7 @@ class Server:
                     if not current_info_user['image_profile']:
                         return self.create_error_response('No profile image to remove', 400)
 
-                    cloudinary.uploader.destroy(f'image_profile_{current_user}', resource_type="image")
+                    self.cloudinary.uploader.destroy(f'image_profile_{current_user}', resource_type="image")
                     self.users_collection.update_one({"username": current_user}, {"$set": {"image_profile": ""}})
                     return jsonify({'message': 'Profile image removed successfully'}), 200
 
@@ -1021,7 +911,7 @@ class Server:
                 if detected_mime_type != expected_mime_type:
                     return self.create_error_response(f'Invalid file type. Detected: {detected_mime_type}. Expected: {expected_mime_type}', 400)
 
-                upload_result = cloudinary.uploader.upload(
+                upload_result = self.cloudinary.uploader.upload(
                     self.filepath_secure,
                     public_id=f'image_profile_{current_user}',
                     overwrite=True, 
@@ -1051,17 +941,12 @@ class Server:
                     getattr(self, "filepath_secure", None),
                     getattr(self, "filepath_secure_webp", None),
                 )
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
 
         @self.app.route('/lectify/ping_email_delete_account', methods=['POST'])
         @jwt_required()
         @self.limiter.limit("5 per minute")
         def lectify_ping_email_delete_account() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -1091,7 +976,7 @@ class Server:
                         "$set": {
                             "type_verification": "delete_account",
                             "token": token,
-                            "timestamp": datetime.utcnow()
+                            "timestamp": datetime.now(timezone.utc)
                         }
                     },
                     upsert=True
@@ -1105,19 +990,12 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
         
         @self.app.route('/lectify/pong_email_delete_account', methods=['DELETE'])
         @jwt_required()
         @self.limiter.limit("5 per minute")
         def lectify_pong_email_delete_account() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -1163,18 +1041,11 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
         
         @self.app.route('/lectify/ping_email_reset_password', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_ping_check_email_reset_password() -> Response:
-            try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-                
+            try:                
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -1201,7 +1072,7 @@ class Server:
                         "$set": {
                             "type_verification": "reset_password",
                             "token": token,
-                            "timestamp": datetime.utcnow()
+                            "timestamp": datetime.now(timezone.utc)
                         }
                     },
                     upsert=True
@@ -1215,18 +1086,11 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
         
         @self.app.route('/lectify/pong_email_reset_password', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_pong_verify_email_reset_password() -> Response:
             try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-
                 current_user = self.user_or_ip()
 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -1273,19 +1137,12 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
 
         @self.app.route('/lectify/checkout', methods=['POST'])
         @jwt_required()
         @self.limiter.limit("10 per minute")
         def lectify_checkout() -> Response:
             try:
-                if not self.processing_lock.acquire(blocking=False):
-                    return self.create_error_response("Server busy. Please try again shortly", 429)
-
                 current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
@@ -1302,9 +1159,9 @@ class Server:
                     return self.create_error_response("User already has a paid plan", 400)
             
                 data = request.get_json()
-                plan = data.get("plan").strip().lower()
-                success_url = data.get("success_url").strip()
-                cancel_url = data.get("cancel_url").strip()
+                plan = data.get("plan", "").strip().lower()
+                success_url = data.get("success_url", "").strip()
+                cancel_url = data.get("cancel_url", "").strip()
 
                 if not plan or plan not in self.plans:
                     return self.create_error_response("Plan is required", 400)
@@ -1323,7 +1180,7 @@ class Server:
                 checkout_session = stripe.checkout.Session.create(
                     mode='payment',
                     line_items=[{
-                    'price': self.plans[plan],
+                    'price': "price_1RuadkRzECYxXri5oieuiwao",
                     'quantity': 1}],
                     payment_method_types=['card'],
                     metadata={
@@ -1337,12 +1194,8 @@ class Server:
             
                 return jsonify({'checkout_url': checkout_session.url}), 200
 
-            except Exception:
-                return self.create_error_response('An error occurred while processing the request', 500)
-            
-            finally:
-                if self.processing_lock.locked():
-                    self.processing_lock.release()
+            except Exception as e:
+                return self.create_error_response(f'{e}An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/webhook', methods=['POST'])
         def lectify_webhook() -> Response:
@@ -1351,7 +1204,7 @@ class Server:
                 sig_header = request.headers.get('Stripe-Signature')
 
                 event = stripe.Webhook.construct_event(
-                    payload, sig_header, self.stripe_webhook_secret
+                    payload, sig_header, os.getenv("stripe_webhook_secret")
                 )
 
             except ValueError:
@@ -1365,24 +1218,21 @@ class Server:
                 username = session['metadata']['username']
                 plan = session['metadata']['plan']
 
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 end_date = now + self.durations.get(plan, timedelta(days=30))
 
-                user = self.get_user(username)
-
-                if user:
-                    self.users_collection.update_one(
-                        {"username": username},
-                        {"$set": {
-                            "is_free": False,
-                            "plan": plan,
-                            "subscription_end": end_date
-                        }
-                    },
-                    upsert=True
-                )
-                    
-            return jsonify({'status': 'success'}), 200
+                self.users_collection.update_one(
+                    {"username": username},
+                    {"$set": {
+                        "is_free": False,
+                        "plan": plan,
+                        "subscription_end": end_date
+                                }
+                            },
+                            upsert=True
+                        )
+                                
+                return jsonify({'status': 'success'}), 200
         
     def run_production(self, host: str = '0.0.0.0', port: int = 5000) -> None:
         self.app.run(debug=False, host=host, port=port, use_reloader=False)

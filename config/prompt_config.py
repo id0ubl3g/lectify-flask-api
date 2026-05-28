@@ -36,7 +36,7 @@ data_questions = {
 }
 
 prompt_questions = f"""
-Gere 1 questão de múltipla escolha com base no trecho.
+Gere 5 questão de múltipla escolha com base no trecho.
 Retorne somente JSON válido.
 
 Formato exato (não altere chaves):

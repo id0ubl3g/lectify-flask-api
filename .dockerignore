@@ -1,0 +1,31 @@
+# Byte-compiled
+__pycache__/
+
+# Environments
+.venv
+.env
+
+# Database
+temp/
+dump.rdb
+
+# IDE 
+.vscode/
+
+# Ignore the test folder
+tests/
+
+# Docker 
+*.tar
+
+# Audio files
+*.wav
+
+# Markdown files
+*.md
+
+# PDF files
+*.pdf
+
+# Json files
+*.json
