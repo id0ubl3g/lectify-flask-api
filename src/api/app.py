@@ -33,6 +33,7 @@ import random
 import stripe
 import magic
 import json
+import math
 import os
 import re
 
@@ -159,11 +160,11 @@ class Server:
     def check_and_apply_block(self, current_user: str, increment: bool = True) -> Response | None:
         block_key = f"blocked:{current_user}"
         count_key = f"count429:{current_user}"
-
-        if self.redis_client.exists(block_key):
-            ttl = self.redis_client.ttl(block_key)
-            minutes = max(1, ttl // 60)
-            return self.create_error_response(f"You have been temporarily blocked due to repeated rate limit violations. Please try again in {minutes} minute(s).", 429)
+        
+        ttl = self.redis_client.ttl(block_key)
+        if ttl > 0:
+            minutes = max(1, math.ceil(ttl / 60))
+            return self.create_error_response(f"You have been temporarily blocked due to repeated rate limit violations. Please try again in {minutes} minute(s).", 403)
         
         count =  None
         
@@ -171,16 +172,17 @@ class Server:
             pipe = self.redis_client.pipeline()
             pipe.incr(count_key)
             pipe.expire(count_key, 300)
+            
             count, _ = pipe.execute()
 
         if increment and count == 3:
             return self.create_error_response("You are approaching the rate limit. One more failed attempt will block you for 30 minutes. Please try again later.", 429)
 
-        if increment and count and count > 3:
+        if increment and count >= 4:
             self.redis_client.set(block_key, 1, ex=1800)
             self.redis_client.delete(count_key)
             
-            return self.create_error_response("You have been temporarily blocked due to repeated rate limit violations.", 429)
+            return self.create_error_response("You have been temporarily blocked due to repeated rate limit violations.", 403)
         
         return None
 
@@ -198,9 +200,6 @@ class Server:
             if endpoint in ("lectify_summarize", "lectify_questions"):
                 if self.user_is_free(current_user):
                     return self.create_error_response("Monthly free plan limit exceeded.", 429)
-
-                if not self.user_is_free(current_user):
-                    return self.create_error_response("Monthly subscription limit exceeded.", 429)
 
             return self.create_error_response("Too many requests. Please try again later.", 429)
         

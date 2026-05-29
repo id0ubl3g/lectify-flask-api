@@ -57,6 +57,15 @@ def init_flasgger(app: Flask) -> None:
                         }
                     ],
                     'responses': {
+                        200: {
+                            'description': 'Request placed in queue successfully.',
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'message': {'type': 'string', 'example': 'Your request has been successfully placed in the RabbitMQ queue and will be processed shortly'}
+                                }
+                            }
+                        },
                         201: {
                             'description': 'Document generated successfully.',
                             'schema': {
@@ -64,9 +73,6 @@ def init_flasgger(app: Flask) -> None:
                                 'format': 'binary',
                                 'description': 'Downloadable MD or PDF file.'
                             }
-                        },
-                        401: {
-                            'description': 'Unauthorized (invalid JWT token).'
                         },
                         400: {
                             'description': 'Invalid request.',
@@ -79,25 +85,16 @@ def init_flasgger(app: Flask) -> None:
                                 'missing_format': {'error': 'Missing output format'},
                                 'invalid_format': {'error': 'Invalid format. Supported formats: md, pdf'},
                                 'missing_language': {'error': 'Missing language selection'},
-                                'invalid_language': {'error': 'Invalid format. Supported formats: pt-BR, en-US'},
-                                'download_error': {'error': 'Download error occurred. Please check the URL and your network connection'},
-                                'network_error': {'error': 'Network error. Please check your internet connection'},
-                                'audio_download_error': {'error': 'Error during audio downloading'},
-                                'audio_recognition_error': {'error': 'Error during audio recognition'},
-                                'chat_generation_error': {'error': 'Error during chat generation'},
-                                'document_building_error': {'error': 'Error during document building'},
-                                'os_error': {'error': 'OS error occurred while handling the file'},
-                                'conversion_error': {'error': 'Error during document conversion'},
-                                'file_not_found': {'error': 'File not found'}
+                                'invalid_language': {'error': 'Invalid format. Supported formats: pt-BR, en-US'}
                             }
                         },
-                        429: {
-                            'description': 'Too many requests or server busy.',
+                        401: {
+                            'description': 'Unauthorized (invalid JWT token).'
+                        },
+                        409: {
+                            'description': 'Request already in progress.',
                             'examples': {
-                                'busy': {'error': 'Server busy. Please try again shortly'},
-                                'rate_limit': {'error': 'Too many requests. Please try again later.'},
-                                'monthly_limit': {'error': 'Monthly limit exceeded or you are making too many requests. Please try again later.'},
-                                'blocked': {'error': 'You have been temporarily blocked due to repeated rate limit violations. Please try again in X minute(s).'}
+                                'already_processing': {'error': 'A summarize request is already being processed for this request'}
                             }
                         },
                         500: {
@@ -107,6 +104,74 @@ def init_flasgger(app: Flask) -> None:
                     }
                 }
             },
+
+            '/check_summarize': {
+                'post': {
+                    'tags': ['Video Summarization'],
+                    'summary': 'Checks the status of a summarization request.',
+                    'security': [{'Bearer': []}],
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'youtube_url': {
+                                        'type': 'string',
+                                        'description': 'YouTube video URL.',
+                                        'example': 'https://www.youtube.com/watch?v=iuPrkzJp20I'
+                                    },
+                                    'output_format': {
+                                        'type': 'string',
+                                        'enum': ['md', 'pdf'],
+                                        'example': 'pdf'
+                                    },
+                                    'language_select': {
+                                        'type': 'string',
+                                        'enum': ['pt-BR', 'en-US'],
+                                        'example': 'pt-BR'
+                                    }
+                                },
+                                'required': ['youtube_url', 'output_format', 'language_select']
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Status retrieved successfully.',
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'username': {'type': 'string'},
+                                    'youtube_url': {'type': 'string'},
+                                    'language_select': {'type': 'string'},
+                                    'output_format': {'type': 'string'},
+                                    'status': {'type': 'string', 'example': 'processing'}
+                                }
+                            }
+                        },
+                        400: {
+                            'description': 'Invalid request.',
+                            'examples': {
+                                'no_data': {'error': 'No data provided'},
+                                'missing_fields': {'error': 'Missing required fields: youtube_url, output_format'},
+                                'queue_empty': {'error': 'queue is empty, summarize not started'}
+                            }
+                        },
+                        401: {
+                            'description': 'Unauthorized.'
+                        },
+                        500: {
+                            'description': 'Internal server error.',
+                            'examples': {'error': {'error': 'An error occurred while processing the request'}}
+                        }
+                    }
+                }
+            },
+
             '/questions': {
                 'post': {
                     'tags': ['Question Generation'],
@@ -148,9 +213,6 @@ def init_flasgger(app: Flask) -> None:
                                     }
                                 }
                             }
-                        },
-                        401: {
-                            'description': 'Unauthorized.'
                         },
                         400: {
                             'description': 'Invalid request.',

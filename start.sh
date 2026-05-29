@@ -12,6 +12,15 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
+if [ ! -d ".venv" ]; then
+  python3 -m venv .venv
+fi
+
+source .venv/bin/activate
+
+pip install --upgrade pip
+pip install -r requirements.txt
+
 docker compose up -d
 
 until nc -z localhost 5672; do sleep 2; done
@@ -21,12 +30,12 @@ lsof -ti :5000 | xargs kill -9 2>/dev/null || true
 
 source .venv/bin/activate
 
-python3 run.py
+python3 run.py &
 
 until nc -z localhost 5000; do sleep 1; done
 
 while true; do
-  PYTHONWARNINGS="ignore" PYTHONPATH=. python3 -m src.workers.summarize_worker
+  PYTHONWARNINGS="ignore::SyntaxWarning" PYTHONPATH=. python3 -m src.workers.summarize_worker
   sleep 2
 done &
 
