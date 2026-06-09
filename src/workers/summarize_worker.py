@@ -11,6 +11,7 @@ from src.utils.system_utils import clean_up
 from src.rabbitmq.connection import get_connection
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+import traceback
 import json
 import os
 
@@ -122,7 +123,8 @@ class Worker:
             print('message: Message processed successfully')
             ch.basic_ack(delivery_tag=method.delivery_tag)
         
-        except Exception as e:
+        except Exception as e:            
+            traceback.print_exc()
             self.check_summarize_collection.update_one({
                     "username":username},
                     {
@@ -132,11 +134,18 @@ class Worker:
                     },
                     upsert=True
                 )
-            print(f'{e}message: Error during worker execution')
+            print('message: Error during worker execution')
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
+        except KeyboardInterrupt:
+            if self.channel.is_open:
+                self.channel.stop_consuming()
+
+            if self.connection.is_open:
+                self.connection.close()
+
         finally:
-                clean_up(relative_path_markdown, relative_path_pdf, relative_path_audio)
+            clean_up(relative_path_markdown, relative_path_pdf, relative_path_audio)
     
     def execute(self):
         self.channel.basic_consume(

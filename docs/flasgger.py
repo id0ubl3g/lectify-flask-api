@@ -104,7 +104,6 @@ def init_flasgger(app: Flask) -> None:
                     }
                 }
             },
-
             '/check_summarize': {
                 'post': {
                     'tags': ['Video Summarization'],
@@ -171,7 +170,75 @@ def init_flasgger(app: Flask) -> None:
                     }
                 }
             },
-
+            '/summarize/files': {
+                'get': {
+                    'tags': ['Document Management'],
+                    'summary': 'List all summarized files of the current user.',
+                    'security': [{'Bearer': []}],
+                    'responses': {
+                        200: {
+                            'description': 'List of documents returned successfully.',
+                            'schema': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'id': {'type': 'string', 'example': '60d5ecb5f1d4c60015a2b123'},
+                                        'filename': {'type': 'string', 'example': 'aula_inteligencia_artificial.pdf'},
+                                        'youtube_url': {'type': 'string'},
+                                        'filetype': {'type': 'string', 'example': 'pdf'},
+                                        'language': {'type': 'string', 'example': 'pt-BR'},
+                                        'username': {'type': 'string'},
+                                        'summary_at': {'type': 'string', 'format': 'date-time'}
+                                    }
+                                }
+                            }
+                        },
+                        400: {
+                            'description': 'Error fetching documents',
+                            'examples': {
+                                'no_documents': {'error': 'Documents not found in the database'}
+                            }
+                        },
+                        401: {'description': 'Unauthorized.'},
+                        500: {'description': 'Internal server error.'}
+                    }
+                }
+            },
+            '/summarize/files/{file_id}': {
+                'get': {
+                    'tags': ['Document Management'],
+                    'summary': 'Download a specific summarized file by ID.',
+                    'security': [{'Bearer': []}],
+                    'parameters': [
+                        {
+                            'name': 'file_id',
+                            'in': 'path',
+                            'required': True,
+                            'type': 'string',
+                            'description': 'Document ID (MongoDB ObjectId)',
+                            'example': '60d5ecb5f1d4c60015a2b123'
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'File returned for download (PDF or Markdown).',
+                            'schema': {
+                                'type': 'file',
+                                'format': 'binary'
+                            }
+                        },
+                        400: {
+                            'description': 'Document not found.',
+                            'examples': {
+                                'not_found': {'error': 'Document not found in the database'}
+                            }
+                        },
+                        401: {'description': 'Unauthorized.'},
+                        500: {'description': 'Internal server error.'}
+                    }
+                }
+            },
             '/questions': {
                 'post': {
                     'tags': ['Question Generation'],
@@ -814,80 +881,5 @@ def init_flasgger(app: Flask) -> None:
                     }
                 }
             },
-            '/checkout': {
-                'post': {
-                    'tags': ['Payments'],
-                    'summary': 'Creates Stripe checkout session for paid plan.',
-                    'security': [{'Bearer': []}],
-                    'consumes': ['application/json'],
-                    'parameters': [
-                        {
-                            'name': 'body',
-                            'in': 'body',
-                            'required': True,
-                            'schema': {
-                                'type': 'object',
-                                'properties': {
-                                    'plan': {'type': 'string', 'enum': ['1_month', '6_months', '1_year'], 'example': '1_month'},
-                                    'success_url': {'type': 'string', 'example': 'https://lectify.vercel.app/success'},
-                                    'cancel_url': {'type': 'string', 'example': 'https://lectify.vercel.app/cancel'}
-                                },
-                                'required': ['plan', 'success_url', 'cancel_url']
-                            }
-                        }
-                    ],
-                    'responses': {
-                        200: {
-                            'description': 'Session created.',
-                            'schema': {'type': 'object', 'properties': {'checkout_url': {'type': 'string'}}}
-                        },
-                        400: {
-                            'description': 'Invalid plan or user already paid.',
-                            'examples': {
-                                'missing_plan': {'error': 'Plan is required'},
-                                'invalid_plan': {'error': 'Plan is required'},
-                                'already_paid': {'error': 'User already has a paid plan'},
-                                'missing_urls': {'error': 'Success and cancel URLs are required'}
-                            }
-                        },
-                        401: {
-                            'description': 'Unauthorized.'
-                        },
-                        404: {
-                            'description': 'User not found.'
-                        },
-                        429: {
-                            'description': 'Rate limit.'
-                        },
-                        500: {
-                            'description': 'Internal error.'
-                        }
-                    }
-                }
-            },
-            '/webhook': {
-                'post': {
-                    'tags': ['Payments'],
-                    'summary': 'Stripe webhook to process payments (internal).',
-                    'consumes': ['application/json'],
-                    'parameters': [],
-                    'responses': {
-                        200: {
-                            'description': 'Processed successfully.',
-                            'schema': {'type': 'object', 'properties': {'status': {'type': 'string', 'example': 'success'}}}
-                        },
-                        400: {
-                            'description': 'Invalid payload or signature.',
-                            'examples': {
-                                'invalid_payload': {'error': 'Invalid payload'},
-                                'invalid_sig': {'error': 'Invalid signature'}
-                            }
-                        },
-                        500: {
-                            'description': 'Internal error.'
-                        }
-                    }
-                }
-            }
         }
     })

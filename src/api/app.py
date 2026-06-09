@@ -9,12 +9,11 @@ from config.file_config import *
 from config.input_config import *
 
 from config.providers.initialize_mongodb import initialize_mongodb
-from config.providers.initialize_stripe import initialize_stripe
 from config.providers.initialize_redis  import initialize_redis
 from config.providers.initialize_cloudinary  import initialize_cloudinary
 
 from src.utils.send_email_verification import SendEmailVerification
-from src.utils.system_utils import clean_up, is_valid_email, validate_user_data
+from src.utils.system_utils import clean_up, is_valid_email, validate_user_data, sanitize_filename
 
 from flask import Flask, request, jsonify, send_file, Response
 from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token, jwt_required, get_jwt_identity, verify_jwt_in_request
@@ -27,10 +26,11 @@ from pymongo.collection import Collection
 from datetime import datetime, timezone,timedelta
 from dotenv import load_dotenv
 import cloudinary.uploader
+from bson import ObjectId
+import requests
 import secrets
 import string
 import random
-import stripe
 import magic
 import json
 import math
@@ -51,7 +51,6 @@ class Server:
         self.jwt: JWTManager = JWTManager(self.app)
 
         mongo = initialize_mongodb()
-        stripe = initialize_stripe()
         redis = initialize_redis(self.app, self.user_or_ip)
         self.cloudinary = initialize_cloudinary() 
 
@@ -60,10 +59,6 @@ class Server:
         self.check_email_collection: Collection = mongo["check_email_collection"]
         self.users_collection: Collection = mongo["users_collection"]
         self.check_summarize_collection: Collection = mongo["check_summarize_collection"]
-
-        self.stripe_webhook_secret = stripe['stripe_webhook_secret']
-        self.durations = stripe['durations']
-        self.plans = stripe['plans']
 
         self.redis_client = redis["redis_client"]
         self.limiter = redis["limiter"]
@@ -135,13 +130,6 @@ class Server:
             self.users_collection.update_one({"username": username}, {"$set": {"is_free": True}})
         
         return True
-
-    def dynamic_limit(self) -> str | None:
-        username = get_jwt_identity()
-        if self.user_is_free(username):
-            return "30 per 30 days"
-        
-        return None
     
     def user_or_ip(self) -> str:
             try:
@@ -213,7 +201,6 @@ class Server:
 
         @self.app.route('/lectify/summarize', methods=['POST'])
         @jwt_required()
-        @self.limiter.limit(lambda: self.dynamic_limit())
         @self.limiter.limit("5 per minute")
         def lectify_summarize() -> Response:
             try:
@@ -284,12 +271,14 @@ class Server:
                 if file_documents_collection:
                     grid_out = self.grid_fs.get(file_documents_collection["_id"])
                     file_data = grid_out.read()
-                    mimetype = "application/pdf" if output_format == "pdf" else "text/markdown"
+                    filetype = grid_out.filetype
+                    mimetype = "application/pdf" if filetype == "pdf" else "text/markdown"
+
                     return Response(
                             file_data,
                             mimetype=mimetype,
                             headers={
-                                "Content-Disposition": f"attachment; filename={grid_out.filename}"
+                                "Content-Disposition": f"attachment; filename={sanitize_filename(grid_out.filename)}"
                         }
                     )
 
@@ -314,7 +303,7 @@ class Server:
         
         @self.app.route('/lectify/check_summarize', methods=['POST'])
         @jwt_required()
-        @self.limiter.limit("5 per minute")
+        @self.limiter.limit("20 per minute")
         def lectify_check_summarize() -> Response:
             try:
                 current_user = self.user_or_ip()
@@ -387,9 +376,95 @@ class Server:
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
 
+        @self.app.route('/lectify/summarize/files', methods=['GET'])
+        @jwt_required()
+        @self.limiter.limit("5 per minute")
+        def lectify_summarize_files() -> Response:
+            try:
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("Unauthorized", 401)
+
+                try:
+                    file_documents_collection = self.documents_collection.find({
+                        "username": current_user
+                    })
+
+                    if not file_documents_collection:
+                        return self.create_error_response('Documents not found in the database', 400)
+
+                    files = []
+
+                    for file in file_documents_collection:
+                        grid_out = self.grid_fs.get(file["_id"])
+
+                        files.append({
+                            "id": str(file["_id"]),
+                            "filename": grid_out.filename,
+                            "youtube_url": grid_out.youtube_url,
+                            "filetype": grid_out.filetype,
+                            "language": grid_out.language,
+                            "username": grid_out.username,
+                            "summary_at": grid_out.summary_at,
+                        })
+
+                    return jsonify(files), 200
+
+                except Exception:
+                    return self.create_error_response('Error during fetching documents from the database', 400)
+
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request', 500)
+
+                    
+        @self.app.route('/lectify/summarize/files/<string:file_id>', methods=['GET'])
+        @jwt_required()
+        @self.limiter.limit("5 per minute")
+        def lectify_summarize_files_by_id(file_id: str) -> Response:
+            try:
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("Unauthorized", 401)
+
+                try:
+                    file_documents_collection = self.documents_collection.find_one({
+                        "_id": ObjectId(file_id)
+                    })
+
+                    if not file_documents_collection:
+                        return self.create_error_response('Document not found in the database', 400)
+
+                    grid_out = self.grid_fs.get(file_documents_collection["_id"])
+                    file_data = grid_out.read()
+                    filetype = grid_out.filetype
+                    mimetype = "application/pdf" if filetype == "pdf" else "text/markdown"
+
+                    return Response(
+                        file_data,
+                        mimetype=mimetype,
+                        headers={
+                                "Content-Disposition": f"attachment; filename={sanitize_filename(grid_out.filename)}"
+                        }
+                    )
+                
+                except Exception:
+                    return self.create_error_response('Error during fetching document from the database', 400)
+            
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request', 500)
+
         @self.app.route('/lectify/questions', methods=['POST'])
         @jwt_required()
-        @self.limiter.limit(lambda: self.dynamic_limit())
         @self.limiter.limit("5 per minute")
         async def lectify_questions() -> Response:
             try:
@@ -1136,102 +1211,6 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-
-        @self.app.route('/lectify/checkout', methods=['POST'])
-        @jwt_required()
-        @self.limiter.limit("10 per minute")
-        def lectify_checkout() -> Response:
-            try:
-                current_user = self.user_or_ip()
-                
-                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
-                if response_check_and_apply_block:
-                    return response_check_and_apply_block
-                            
-                if not current_user:
-                    return self.create_error_response("Unauthorized", 401)
-                
-                if not self.get_user(current_user):
-                    return self.create_error_response("User not found", 404)
-                
-                if not self.user_is_free(current_user):
-                    return self.create_error_response("User already has a paid plan", 400)
-            
-                data = request.get_json()
-                plan = data.get("plan", "").strip().lower()
-                success_url = data.get("success_url", "").strip()
-                cancel_url = data.get("cancel_url", "").strip()
-
-                if not plan or plan not in self.plans:
-                    return self.create_error_response("Plan is required", 400)
-                
-                if not success_url or not cancel_url:
-                    return self.create_error_response("Success and cancel URLs are required", 400)
-                
-                validation_error = validate_user_data({
-                    "success_url": success_url,
-                    "cancel_url": cancel_url
-                })
-
-                if validation_error:
-                    return self.create_error_response(validation_error, 400)
-                
-                checkout_session = stripe.checkout.Session.create(
-                    mode='payment',
-                    line_items=[{
-                    'price': "price_1RuadkRzECYxXri5oieuiwao",
-                    'quantity': 1}],
-                    payment_method_types=['card'],
-                    metadata={
-                        'username': current_user,
-                        'plan': plan
-                    },
-
-                    success_url=success_url,
-                    cancel_url=cancel_url
-                )
-            
-                return jsonify({'checkout_url': checkout_session.url}), 200
-
-            except Exception as e:
-                return self.create_error_response(f'{e}An error occurred while processing the request', 500)
-
-        @self.app.route('/lectify/webhook', methods=['POST'])
-        def lectify_webhook() -> Response:
-            try:
-                payload = request.data
-                sig_header = request.headers.get('Stripe-Signature')
-
-                event = stripe.Webhook.construct_event(
-                    payload, sig_header, os.getenv("stripe_webhook_secret")
-                )
-
-            except ValueError:
-                return self.create_error_response('Invalid payload', 400)
-            
-            except stripe.error.SignatureVerificationError:
-                return self.create_error_response('Invalid signature', 400)
-
-            if event['type'] == 'checkout.session.completed':
-                session = event['data']['object']
-                username = session['metadata']['username']
-                plan = session['metadata']['plan']
-
-                now = datetime.now(timezone.utc)
-                end_date = now + self.durations.get(plan, timedelta(days=30))
-
-                self.users_collection.update_one(
-                    {"username": username},
-                    {"$set": {
-                        "is_free": False,
-                        "plan": plan,
-                        "subscription_end": end_date
-                                }
-                            },
-                            upsert=True
-                        )
-                                
-                return jsonify({'status': 'success'}), 200
         
     def run_production(self, host: str = '0.0.0.0', port: int = 5000) -> None:
         self.app.run(debug=False, host=host, port=port, use_reloader=False)

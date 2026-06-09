@@ -45,7 +45,6 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
 - JWT-based authentication & refresh tokens
 - Email verification, password reset & account deletion flows
 - Profile management (including image upload via Cloudinary)
-- Stripe subscription integration (monthly, 6 months, yearly plans)
 - Rate limiting & Redis caching
 - Interactive API docs with Flasgger
 
@@ -131,7 +130,6 @@ Edit .env (use nano .env or your editor) and fill in:
 - API keys (YouTube, Gemini, etc.)
 - RabbitMQ user and password
 - Email SMTP settings
-- Stripe keys
 - MongoDB connection
 - Cloudinary (for profile images)
 Base URLs, etc.
@@ -155,11 +153,11 @@ path_google_application_credentials_json=config/google_credentials.json
 ```sh
 git clone https://github.com/id0ubl3g/lectify-flask-api
 cd lectify-flask-api
-chmod +x start.sh
-./start.sh
+chmod +x install.sh
+make run
 ```
 
-The `start.sh` script automatically handles virtual environment, dependencies installation, Docker services, Flask API and the Summarize Worker.
+The `make run` command automatically sets up the virtual environment, installs dependencies, starts Docker services, launches the Flask API, and runs the Summarize Worker.
 
 ## API Documentation
 
@@ -173,6 +171,8 @@ Interactive API Documentation: [http://127.0.0.1:5000/apidocs/](http://127.0.0.1
 | -------- | ------------------------------------ | ----------------------------------------------------------- |
 | `POST`   | `/lectify/summarize`                 | Generates a summary of a YouTube video in MD or PDF format. |
 | `POST`   | `/lectify/check_summarize`           | Checks the status of a summarization request.               |
+| `GET`    | `/lectify/summarize/files`           | List all summarized files of the current user.              |
+| `GET`    | `/lectify/summarize/files/<file_id>` | Download a specific summarized file by ID.                  |
 | `POST`   | `/lectify/questions`                 | Generates questions from an MD or PDF file.                 |
 | `POST`   | `/lectify/check_email_register`      | Sends verification code via email for registration.         |
 | `POST`   | `/lectify/verify_email_register`     | Verifies email code for registration.                       |
@@ -186,8 +186,6 @@ Interactive API Documentation: [http://127.0.0.1:5000/apidocs/](http://127.0.0.1
 | `DELETE` | `/lectify/pong_email_delete_account` | Verifies token and deletes user account.                    |
 | `POST`   | `/lectify/ping_email_reset_password` | Sends password reset link via email.                        |
 | `POST`   | `/lectify/pong_email_reset_password` | Verifies token and updates password.                        |
-| `POST`   | `/lectify/checkout`                  | Creates Stripe checkout session for paid plans.             |
-| `POST`   | `/lectify/webhook`                   | Stripe webhook to process payments internally.              |
 
 
 ### Core Endpoints

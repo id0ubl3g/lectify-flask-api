@@ -1,5 +1,6 @@
 from email_validator import validate_email, EmailNotValidError
 
+import unicodedata
 import re
 import os
 
@@ -72,3 +73,11 @@ def validate_user_data(data: dict) -> str | None:
                 return error_msg
             
     return None
+
+def sanitize_filename(name: str, max_length: int = 120) -> str:
+    name = unicodedata.normalize("NFKD", name)
+    name = name.encode("ascii", "ignore").decode("ascii")
+    name = re.sub(r"[^a-zA-Z0-9._-]", "_", name)
+    name = re.sub(r"_+", "_", name).strip("_")
+
+    return name[:max_length]
