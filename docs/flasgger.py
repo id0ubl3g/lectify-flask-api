@@ -7,7 +7,7 @@ def init_flasgger(app: Flask) -> None:
         'info': {
             'title': 'Lectify Flask API',
             'version': '2.0.0',
-            'description': 'AI-powered Flask API to summarize video lectures with detailed insights.'
+            'description': 'AI-powered Flask API to summarize video lectures with detailed insights'
         },
         'basePath': '/lectify',
         'securityDefinitions': {
@@ -15,14 +15,14 @@ def init_flasgger(app: Flask) -> None:
                 'type': 'apiKey',
                 'in': 'header',
                 'name': 'Authorization',
-                'description': 'JWT Authorization header using the Bearer {token} format.'
+                'description': 'JWT Authorization header using the Bearer {token} format'
             }
         },
         'paths': {
             '/summarize': {
                 'post': {
                     'tags': ['Video Summarization'],
-                    'summary': 'Generates a summary of a YouTube video in MD or PDF format.',
+                    'summary': 'Generates a summary of a YouTube video in MD or PDF format',
                     'security': [{'Bearer': []}],
                     'consumes': ['application/json'],
                     'parameters': [
@@ -30,25 +30,25 @@ def init_flasgger(app: Flask) -> None:
                             'name': 'body',
                             'in': 'body',
                             'required': True,
-                            'description': 'Video data and output format.',
+                            'description': 'Video data and output format',
                             'schema': {
                                 'type': 'object',
                                 'properties': {
                                     'youtube_url': {
                                         'type': 'string',
-                                        'description': 'YouTube video URL.',
+                                        'description': 'YouTube video URL',
                                         'example': 'https://www.youtube.com/watch?v=iuPrkzJp20I'
                                     },
                                     'output_format': {
                                         'type': 'string',
                                         'enum': ['md', 'pdf'],
-                                        'description': 'Desired output format.',
+                                        'description': 'Desired output format',
                                         'example': 'pdf'
                                     },
                                     'language_select': {
                                         'type': 'string',
                                         'enum': ['pt-BR', 'en-US'],
-                                        'description': 'Language for recognition and summarization.',
+                                        'description': 'Language for recognition and summarization',
                                         'example': 'pt-BR'
                                     }
                                 },
@@ -58,7 +58,7 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Request placed in queue successfully.',
+                            'description': 'Request placed in queue successfully',
                             'schema': {
                                 'type': 'object',
                                 'properties': {
@@ -67,15 +67,15 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         201: {
-                            'description': 'Document generated successfully.',
+                            'description': 'Document generated successfully',
                             'schema': {
                                 'type': 'file',
                                 'format': 'binary',
-                                'description': 'Downloadable MD or PDF file.'
+                                'description': 'Downloadable MD or PDF file'
                             }
                         },
                         400: {
-                            'description': 'Invalid request.',
+                            'description': 'Invalid request',
                             'examples': {
                                 'no_data': {'error': 'No data provided'},
                                 'missing_fields': {'error': 'Missing required fields: youtube_url, output_format'},
@@ -83,23 +83,28 @@ def init_flasgger(app: Flask) -> None:
                                 'url_too_long': {'error': 'URL exceeds maximum length of 200 characters'},
                                 'invalid_url': {'error': 'Invalid YouTube URL'},
                                 'missing_format': {'error': 'Missing output format'},
-                                'invalid_format': {'error': 'Invalid format. Supported formats: md, pdf'},
+                                'invalid_format': {'error': 'Invalid format Supported formats: md, pdf'},
                                 'missing_language': {'error': 'Missing language selection'},
-                                'invalid_language': {'error': 'Invalid format. Supported formats: pt-BR, en-US'}
+                                'invalid_language': {'error': 'Invalid language Supported formats: pt-BR, en-US'}
                             }
                         },
                         401: {
-                            'description': 'Unauthorized (invalid JWT token).'
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
                         },
                         409: {
-                            'description': 'Request already in progress.',
+                            'description': 'Request already in progress',
                             'examples': {
                                 'already_processing': {'error': 'A summarize request is already being processed for this request'}
                             }
                         },
+                        429: {
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
+                        },
                         500: {
-                            'description': 'Internal server error.',
-                            'examples': {'error': {'error': 'An error occurred while processing the request'}}
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
@@ -107,7 +112,7 @@ def init_flasgger(app: Flask) -> None:
             '/check_summarize': {
                 'post': {
                     'tags': ['Video Summarization'],
-                    'summary': 'Checks the status of a summarization request.',
+                    'summary': 'Checks the status of a summarization request',
                     'security': [{'Bearer': []}],
                     'consumes': ['application/json'],
                     'parameters': [
@@ -120,7 +125,7 @@ def init_flasgger(app: Flask) -> None:
                                 'properties': {
                                     'youtube_url': {
                                         'type': 'string',
-                                        'description': 'YouTube video URL.',
+                                        'description': 'YouTube video URL',
                                         'example': 'https://www.youtube.com/watch?v=iuPrkzJp20I'
                                     },
                                     'output_format': {
@@ -140,7 +145,7 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Status retrieved successfully.',
+                            'description': 'Status retrieved successfully',
                             'schema': {
                                 'type': 'object',
                                 'properties': {
@@ -153,7 +158,7 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         400: {
-                            'description': 'Invalid request.',
+                            'description': 'Invalid request',
                             'examples': {
                                 'no_data': {'error': 'No data provided'},
                                 'missing_fields': {'error': 'Missing required fields: youtube_url, output_format'},
@@ -161,10 +166,15 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         401: {
-                            'description': 'Unauthorized.'
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
+                        },
+                        429: {
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal server error.',
+                            'description': 'Internal server error',
                             'examples': {'error': {'error': 'An error occurred while processing the request'}}
                         }
                     }
@@ -173,11 +183,11 @@ def init_flasgger(app: Flask) -> None:
             '/summarize/files': {
                 'get': {
                     'tags': ['Document Management'],
-                    'summary': 'List all summarized files of the current user.',
+                    'summary': 'List all summarized files of the current user',
                     'security': [{'Bearer': []}],
                     'responses': {
                         200: {
-                            'description': 'List of documents returned successfully.',
+                            'description': 'List of documents returned successfully',
                             'schema': {
                                 'type': 'array',
                                 'items': {
@@ -200,15 +210,25 @@ def init_flasgger(app: Flask) -> None:
                                 'no_documents': {'error': 'Documents not found in the database'}
                             }
                         },
-                        401: {'description': 'Unauthorized.'},
-                        500: {'description': 'Internal server error.'}
+                        401: {
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
+                        },
+                        429: {
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
+                        },
+                        500: {
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
+                        }
                     }
                 }
             },
             '/summarize/files/{file_id}': {
                 'get': {
                     'tags': ['Document Management'],
-                    'summary': 'Download a specific summarized file by ID.',
+                    'summary': 'Download a specific summarized file by ID',
                     'security': [{'Bearer': []}],
                     'parameters': [
                         {
@@ -222,27 +242,37 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'File returned for download (PDF or Markdown).',
+                            'description': 'File returned for download (PDF or Markdown)',
                             'schema': {
                                 'type': 'file',
                                 'format': 'binary'
                             }
                         },
                         400: {
-                            'description': 'Document not found.',
+                            'description': 'Document not found',
                             'examples': {
                                 'not_found': {'error': 'Document not found in the database'}
                             }
                         },
-                        401: {'description': 'Unauthorized.'},
-                        500: {'description': 'Internal server error.'}
+                        401: {
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
+                        },
+                        429: {
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
+                        },
+                        500: {
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
+                        }
                     }
                 }
             },
             '/questions': {
                 'post': {
                     'tags': ['Question Generation'],
-                    'summary': 'Generates questions from an MD or PDF file.',
+                    'summary': 'Generates questions from an MD or PDF file',
                     'security': [{'Bearer': []}],
                     'consumes': ['multipart/form-data'],
                     'parameters': [
@@ -251,12 +281,12 @@ def init_flasgger(app: Flask) -> None:
                             'in': 'formData',
                             'type': 'file',
                             'required': True,
-                            'description': 'MD or PDF file for analysis.'
+                            'description': 'MD or PDF file for analysis'
                         }
                     ],
                     'responses': {
                         200: {
-                            'description': 'Questions generated successfully.',
+                            'description': 'Questions generated successfully',
                             'schema': {
                                 'type': 'object',
                                 'properties': {
@@ -282,14 +312,14 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         400: {
-                            'description': 'Invalid request.',
+                            'description': 'Invalid request',
                             'examples': {
                                 'multiple_files': {'error': 'Exactly one file must be uploaded'},
                                 'no_file': {'error': 'No files received'},
-                                'filename_too_long': {'error': 'File name exceeds the maximum length of 200 characters.'},
-                                'invalid_format': {'error': 'Invalid format. Supported formats: md, pdf'},
+                                'filename_too_long': {'error': 'File name exceeds the maximum length of 200 characters'},
+                                'invalid_format': {'error': 'Invalid format Supported formats: md, pdf'},
                                 'suspicious_extension': {'error': 'The filename seems suspicious and contains a blocked extension: .exe'},
-                                'invalid_mime': {'error': 'Invalid file type. Detected: text/plain. Expected: application/pdf'},
+                                'invalid_mime': {'error': 'Invalid file type Detected: text/plain Expected: application/pdf'},
                                 'no_extractable_text_markdown': {'error': 'No extractable text found in the Markdown file'},
                                 'no_extractable_text_pdf': {'error': 'No extractable text found in the PDF'},
                                 'extraction_error': {'error': 'Error during extraction of Markdown text'},
@@ -297,25 +327,30 @@ def init_flasgger(app: Flask) -> None:
                                 'chat_generation_error': {'error': 'Error during chat generation'}
                             }
                         },
+                        401: {
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
+                        },
                         413: {
-                            'description': 'File too large.',
-                            'examples': {'error': {'error': 'File size exceeds the maximum limit of 5 MB.'}}
+                            'description': 'File too large',
+                            'examples': {'error': {'error': 'File size exceeds the maximum limit of 5 MB'}}
                         },
                         429: {
-                            'description': 'Too many requests.',
-                            'examples': {'error': {'error': 'Too many requests. Please try again later.'}}
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal error.',
-                            'examples': {'error': {'error': 'An error occurred while processing the request'}}
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
             },
+            # Authentication endpoints
             '/check_email_register': {
                 'post': {
                     'tags': ['Authentication'],
-                    'summary': 'Sends verification code via email for registration.',
+                    'summary': 'Sends verification code via email for registration',
                     'consumes': ['application/json'],
                     'parameters': [
                         {
@@ -333,11 +368,11 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Code sent.',
+                            'description': 'Code sent',
                             'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Verification code sent to email'}}}
                         },
                         400: {
-                            'description': 'Invalid or existing email.',
+                            'description': 'Invalid or existing email',
                             'examples': {
                                 'missing_email': {'error': 'Email is required'},
                                 'invalid_email': {'error': 'Invalid email format'},
@@ -345,11 +380,11 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         429: {
-                            'description': 'Rate limit.',
-                            'examples': {'error': {'error': 'Too many requests. Please try again later.'}}
+                            'description': 'Rate limit',
+                            'examples': {'error': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal error.',
+                            'description': 'Internal error',
                             'examples': {'error': {'error': 'An error occurred while processing the request'}}
                         }
                     }
@@ -358,7 +393,7 @@ def init_flasgger(app: Flask) -> None:
             '/verify_email_register': {
                 'post': {
                     'tags': ['Authentication'],
-                    'summary': 'Verifies email code for registration.',
+                    'summary': 'Verifies email code for registration',
                     'consumes': ['application/json'],
                     'parameters': [
                         {
@@ -377,11 +412,11 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Email verified.',
+                            'description': 'Email verified',
                             'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Email verified successfully'}}}
                         },
                         400: {
-                            'description': 'Invalid code or email not found.',
+                            'description': 'Invalid code or email not found',
                             'examples': {
                                 'missing_fields': {'error': 'Email and code are required'},
                                 'invalid_email': {'error': 'Invalid email format'},
@@ -391,14 +426,16 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         404: {
-                            'description': 'Email not found.',
+                            'description': 'Email not found',
                             'examples': {'error': {'error': 'Email not found'}}
                         },
                         429: {
-                            'description': 'Rate limit.'
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal error.'
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
@@ -406,7 +443,7 @@ def init_flasgger(app: Flask) -> None:
             '/register': {
                 'post': {
                     'tags': ['Authentication'],
-                    'summary': 'Registers a new user.',
+                    'summary': 'Registers a new user',
                     'consumes': ['application/json'],
                     'parameters': [
                         {
@@ -428,11 +465,11 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         201: {
-                            'description': 'User registered.',
+                            'description': 'User registered',
                             'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'User registered successfully'}}}
                         },
                         400: {
-                            'description': 'Invalid or duplicate data.',
+                            'description': 'Invalid or duplicate data',
                             'examples': {
                                 'missing_fields': {'error': 'Username, password, email, firstname and lastname are required'},
                                 'exists_username': {'error': 'Username already exists'},
@@ -441,10 +478,12 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         429: {
-                            'description': 'Rate limit.'
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal error.'
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
@@ -452,7 +491,7 @@ def init_flasgger(app: Flask) -> None:
             '/login': {
                 'post': {
                     'tags': ['Authentication'],
-                    'summary': 'Logs in and returns JWT tokens.',
+                    'summary': 'Logs in and returns JWT tokens',
                     'consumes': ['application/json'],
                     'parameters': [
                         {
@@ -471,7 +510,7 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Login successful.',
+                            'description': 'Login successful',
                             'schema': {
                                 'type': 'object',
                                 'properties': {
@@ -481,7 +520,7 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         400: {
-                            'description': 'Invalid credentials.',
+                            'description': 'Invalid credentials',
                             'examples': {
                                 'invalid_email': {'error': 'Invalid email format'},
                                 'missing_password': {'error': 'Password is required'},
@@ -489,18 +528,20 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         401: {
-                            'description': 'Incorrect credentials.',
+                            'description': 'Incorrect credentials',
                             'examples': {'error': {'error': 'Invalid email or password'}}
                         },
                         404: {
-                            'description': 'User not found.',
+                            'description': 'User not found',
                             'examples': {'error': {'error': 'User not found'}}
                         },
                         429: {
-                            'description': 'Rate limit.'
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal error.'
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
@@ -508,11 +549,11 @@ def init_flasgger(app: Flask) -> None:
             '/profile': {
                 'get': {
                     'tags': ['User Profile'],
-                    'summary': 'Returns user profile data.',
+                    'summary': 'Returns user profile data',
                     'security': [{'Bearer': []}],
                     'responses': {
                         200: {
-                            'description': 'Profile loaded.',
+                            'description': 'Profile loaded',
                             'schema': {
                                 'type': 'object',
                                 'properties': {
@@ -528,17 +569,20 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         401: {
-                            'description': 'Unauthorized.'
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
                         },
                         404: {
-                            'description': 'User not found.',
+                            'description': 'User not found',
                             'examples': {'error': {'error': 'User not found'}}
                         },
                         429: {
-                            'description': 'Rate limit.'
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal error.'
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
@@ -546,24 +590,28 @@ def init_flasgger(app: Flask) -> None:
             '/refresh_token': {
                 'post': {
                     'tags': ['Authentication'],
-                    'summary': 'Refreshes access token using refresh token.',
+                    'summary': 'Refreshes access token using refresh token',
                     'security': [{'Bearer': []}],
                     'responses': {
                         200: {
-                            'description': 'Token refreshed.',
+                            'description': 'Token refreshed',
                             'schema': {'type': 'object', 'properties': {'access_token': {'type': 'string'}}}
                         },
                         401: {
-                            'description': 'Unauthorized.'
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
                         },
                         404: {
-                            'description': 'User not found.'
+                            'description': 'User not found',
+                            'examples': {'error': {'error': 'User not found'}}
                         },
                         429: {
-                            'description': 'Rate limit.'
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal error.'
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
@@ -571,7 +619,7 @@ def init_flasgger(app: Flask) -> None:
             '/update_profile': {
                 'patch': {
                     'tags': ['User Profile'],
-                    'summary': 'Updates user profile (name or password).',
+                    'summary': 'Updates user profile (name or password)',
                     'security': [{'Bearer': []}],
                     'consumes': ['application/json'],
                     'parameters': [
@@ -591,11 +639,11 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Profile updated.',
+                            'description': 'Profile updated',
                             'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Profile updated successfully'}}}
                         },
                         400: {
-                            'description': 'Empty or invalid fields.',
+                            'description': 'Empty or invalid fields',
                             'examples': {
                                 'empty_firstname': {'error': 'Firstname cannot be empty'},
                                 'empty_lastname': {'error': 'Lastname cannot be empty'},
@@ -606,16 +654,17 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         401: {
-                            'description': 'Unauthorized.'
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
                         },
-                        404: {
-                            'description': 'User not found.'
-                        },
+                        404: {'description': 'User not found'},
                         429: {
-                            'description': 'Rate limit.'
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal error.'
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
@@ -623,7 +672,7 @@ def init_flasgger(app: Flask) -> None:
             '/update_image_profile': {
                 'put': {
                     'tags': ['User Profile'],
-                    'summary': 'Updates or removes user profile image.',
+                    'summary': 'Updates or removes user profile image',
                     'security': [{'Bearer': []}],
                     'consumes': ['multipart/form-data'],
                     'parameters': [
@@ -632,12 +681,12 @@ def init_flasgger(app: Flask) -> None:
                             'in': 'formData',
                             'type': 'file',
                             'required': False,
-                            'description': 'Image file to upload (optional; if not provided, removes existing image).'
+                            'description': 'Image file to upload (optional; if not provided, removes existing image)'
                         }
                     ],
                     'responses': {
                         200: {
-                            'description': 'Profile image updated or removed successfully.',
+                            'description': 'Profile image updated or removed successfully',
                             'schema': {
                                 'type': 'object',
                                 'properties': {
@@ -650,44 +699,46 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         400: {
-                            'description': 'Invalid format or suspicious file.',
+                            'description': 'Invalid format or suspicious file',
                             'examples': {
                                 'multiple_files': {'error': 'Exactly one file must be uploaded'},
                                 'no_image_to_remove': {'error': 'No profile image to remove'},
-                                'invalid_format': {'error': 'Invalid format. Supported formats: png, jpg, jpeg, bmp, tiff, svg, webp, heic, heif'},
+                                'invalid_format': {'error': 'Invalid format Supported formats: png, jpg, jpeg, bmp, tiff, svg, webp, heic, heif'},
                                 'suspicious_extension': {'error': 'The filename seems suspicious and contains a blocked extension: .exe'},
-                                'invalid_mime': {'error': 'Invalid file type. Detected: application/octet-stream. Expected: image/jpeg'}
+                                'invalid_mime': {'error': 'Invalid file type Detected: application/octet-stream Expected: image/jpeg'}
                             }
                         },
                         401: {
-                            'description': 'Unauthorized.'
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
                         },
                         404: {
-                            'description': 'User not found.',
+                            'description': 'User not found',
                             'examples': {'error': {'error': 'User not found'}}
                         },
                         413: {
-                            'description': 'File too large.',
-                            'examples': {'error': {'error': 'File size exceeds the maximum limit of 5 MB.'}}
+                            'description': 'File too large',
+                            'examples': {'error': {'error': 'File size exceeds the maximum limit of 5 MB'}}
                         },
                         429: {
-                            'description': 'Server busy or too many requests.',
+                            'description': 'Server busy or too many requests',
                             'examples': {
-                                'busy': {'error': 'Server busy. Please try again shortly'},
-                                'rate_limit': {'error': 'Too many requests. Please try again later.'}
+                                'busy': {'error': 'Server busy Please try again shortly'},
+                                'rate_limit': {'error': 'Too many requests Please try again later'}
                             }
                         },
                         500: {
-                            'description': 'Internal server error.',
+                            'description': 'Internal server error',
                             'examples': {'error': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
             },
+            # Account Deletion
             '/ping_email_delete_account': {
                 'post': {
                     'tags': ['Account Deletion'],
-                    'summary': 'Sends verification link via email for account deletion.',
+                    'summary': 'Sends verification link via email for account deletion',
                     'security': [{'Bearer': []}],
                     'consumes': ['application/json'],
                     'parameters': [
@@ -707,29 +758,30 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Verification link sent.',
+                            'description': 'Verification link sent',
                             'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Verification code sent to email'}}}
                         },
                         400: {
-                            'description': 'Missing required fields.',
+                            'description': 'Missing required fields',
                             'examples': {'error': {'error': 'Base URL and Reset Password Page URL are required'}}
                         },
                         401: {
-                            'description': 'Unauthorized.'
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
                         },
                         404: {
-                            'description': 'User not found.',
+                            'description': 'User not found',
                             'examples': {'error': {'error': 'User not found'}}
                         },
                         429: {
-                            'description': 'Rate limit or server busy.',
+                            'description': 'Rate limit or server busy',
                             'examples': {
-                                'busy': {'error': 'Server busy. Please try again shortly'},
-                                'rate_limit': {'error': 'Too many requests. Please try again later.'}
+                                'busy': {'error': 'Server busy Please try again shortly'},
+                                'rate_limit': {'error': 'Too many requests Please try again later'}
                             }
                         },
                         500: {
-                            'description': 'Internal error.',
+                            'description': 'Internal error',
                             'examples': {'error': {'error': 'An error occurred while processing the request'}}
                         }
                     }
@@ -738,7 +790,7 @@ def init_flasgger(app: Flask) -> None:
             '/pong_email_delete_account': {
                 'delete': {
                     'tags': ['Account Deletion'],
-                    'summary': 'Verifies token and deletes user account.',
+                    'summary': 'Verifies token and deletes user account',
                     'security': [{'Bearer': []}],
                     'consumes': ['application/json'],
                     'parameters': [
@@ -757,11 +809,11 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Account deleted.',
+                            'description': 'Account deleted',
                             'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Account deleted successfully'}}}
                         },
                         400: {
-                            'description': 'Invalid token or verification.',
+                            'description': 'Invalid token or verification',
                             'examples': {
                                 'missing_token': {'error': 'Token is required'},
                                 'not_found': {'error': 'Email not found'},
@@ -770,30 +822,32 @@ def init_flasgger(app: Flask) -> None:
                             }
                         },
                         401: {
-                            'description': 'Unauthorized.'
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
                         },
                         404: {
-                            'description': 'User not found.',
+                            'description': 'User not found',
                             'examples': {'error': {'error': 'User not found'}}
                         },
                         429: {
-                            'description': 'Rate limit or server busy.',
+                            'description': 'Rate limit or server busy',
                             'examples': {
-                                'busy': {'error': 'Server busy. Please try again shortly'},
-                                'rate_limit': {'error': 'Too many requests. Please try again later.'}
+                                'busy': {'error': 'Server busy Please try again shortly'},
+                                'rate_limit': {'error': 'Too many requests Please try again later'}
                             }
                         },
                         500: {
-                            'description': 'Internal error.',
+                            'description': 'Internal error',
                             'examples': {'error': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
             },
+            # Password Reset
             '/ping_email_reset_password': {
                 'post': {
                     'tags': ['Password Reset'],
-                    'summary': 'Sends password reset link via email.',
+                    'summary': 'Sends password reset link via email',
                     'consumes': ['application/json'],
                     'parameters': [
                         {
@@ -813,30 +867,30 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Link sent.',
+                            'description': 'Link sent',
                             'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Verification sent to email'}}}
                         },
                         400: {
-                            'description': 'Missing data.',
+                            'description': 'Missing data',
                             'examples': {'error': {'error': 'Email, Base URL and Reset Password Page URL are required'}}
                         },
+                        401: {
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
+                        },
                         404: {
-                            'description': 'Email not found.',
+                            'description': 'Email not found',
                             'examples': {'error': {'error': 'Email not found'}}
                         },
-                        429: {
-                            'description': 'Rate limit.'
-                        },
-                        500: {
-                            'description': 'Internal error.'
-                        }
+                        429: {'description': 'Rate limit'},
+                        500: {'description': 'Internal error'}
                     }
                 }
             },
             '/pong_email_reset_password': {
                 'post': {
                     'tags': ['Password Reset'],
-                    'summary': 'Verifies token and updates password.',
+                    'summary': 'Verifies token and updates password',
                     'consumes': ['application/json'],
                     'parameters': [
                         {
@@ -856,11 +910,11 @@ def init_flasgger(app: Flask) -> None:
                     ],
                     'responses': {
                         200: {
-                            'description': 'Password updated.',
+                            'description': 'Password updated',
                             'schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'example': 'Password reset successfully'}}}
                         },
                         400: {
-                            'description': 'Invalid data.',
+                            'description': 'Invalid data',
                             'examples': {
                                 'missing': {'error': 'Email, Token, and new password are required'},
                                 'not_found': {'error': 'Email not found'},
@@ -868,18 +922,97 @@ def init_flasgger(app: Flask) -> None:
                                 'invalid_token': {'error': 'Invalid verification Token'}
                             }
                         },
+                        401: {
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
+                        },
                         404: {
-                            'description': 'Email not found.',
+                            'description': 'Email not found',
                             'examples': {'error': {'error': 'Email not found'}}
                         },
+                        429: {'description': 'Rate limit'},
+                        500: {'description': 'Internal error'}
+                    }
+                }
+            },
+            # Payments
+            '/checkout': {
+                'post': {
+                    'tags': ['Payments'],
+                    'summary': 'Creates checkout session for paid plan',
+                    'security': [{'Bearer': []}],
+                    'consumes': ['application/json'],
+                    'parameters': [
+                        {
+                            'name': 'body',
+                            'in': 'body',
+                            'required': True,
+                            'schema': {
+                                'type': 'object',
+                                'properties': {
+                                    'plan': {'type': 'string', 'enum': ['1_month', '6_months', '1_year'], 'example': '1_month'},
+                                    'success_url': {'type': 'string', 'example': 'https://lectify.vercel.app/success'},
+                                    'failure_url': {'type': 'string', 'example': 'https://lectify.vercel.app/failure'},
+                                    'pending_url': {'type': 'string', 'example': 'https://lectify.vercel.app/pending'}
+                                },
+                                'required': ['plan', 'success_url', 'failure_url', 'pending_url']
+                            }
+                        }
+                    ],
+                    'responses': {
+                        200: {
+                            'description': 'Session created',
+                            'schema': {'type': 'object', 'properties': {'checkout_url': {'type': 'string'}}}
+                        },
+                        400: {
+                            'description': 'Plan required, user already or email not found',
+                            'examples': {
+                                'missing_plan': {'error': 'Plan is required'},
+                                'already_paid': {'error': 'User already has a paid plan'},
+                                'missing_urls': {'error': 'Success, failure and pending URLs are required'},
+                                'email_not_found': {'error': 'No email address found for this account'}
+                            }
+                        },
+                        401: {
+                            'description': 'Unauthorized (invalid JWT token)',
+                            'examples': {'message': {'error': 'You are not authorized to access this resource'}}
+                        },
+                        404: {
+                            'description': 'User not found',
+                            'examples': {'message': {'error': 'User account not found'}}
+                        },
                         429: {
-                            'description': 'Rate limit.'
+                            'description': 'Rate limit',
+                            'examples': {'message': {'error': 'Too many requests Please try again later'}}
                         },
                         500: {
-                            'description': 'Internal error.'
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
                         }
                     }
                 }
             },
+            '/webhook': {
+                'post': {
+                    'tags': ['Payments'],
+                    'summary': 'Stripe webhook to process payments (internal)',
+                    'consumes': ['application/json'],
+                    'parameters': [],
+                    'responses': {
+                        200: {
+                            'description': 'Processed successfully',
+                            'examples': {'message': {'message': 'Webhook processed successfully'}}
+                        },
+                        400: {
+                            'description': 'Failed payment',
+                            'examples': {'message': {'error': 'Failed to retrieve payment information from Mercado Pago'}}
+                        },
+                        500: {
+                            'description': 'Internal error',
+                            'examples': {'message': {'error': 'An error occurred while processing the request'}}
+                        }
+                    }
+                }
+            }
         }
     })

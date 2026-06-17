@@ -7,7 +7,7 @@ load_dotenv()
 
 def initialize_mongodb():
     mongo_uri = os.getenv('MONGO_URI')
-    client = MongoClient(mongo_uri)
+    client = MongoClient(mongo_uri, tz_aware=True)
     db = client['lectify-flask-api']
 
     grid_fs = gridfs.GridFS(db, collection="documents")

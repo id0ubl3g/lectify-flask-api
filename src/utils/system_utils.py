@@ -54,12 +54,16 @@ def validate_user_data(data: dict) -> str | None:
             (r'^.{1,2083}$', "Success URL must be between 1 and 2083 characters long"),
             (r'^https://([\w\-]+\.)+[\w\-]+(/[\w\-./?%&=]*)?$', "Success URL format is invalid")
         ],
-        "cancel_url": [
-            (r'^https://', "Cancel URL must start with https://"),
-            (r'^.{1,2083}$', "Cancel URL must be between 1 and 2083 characters long"),
-            (r'^https://([\w\-]+\.)+[\w\-]+(/[\w\-./?%&=]*)?$', "Cancel URL format is invalid")
+        "failure_url": [
+            (r'^https://', "Failure URL must start with https://"),
+            (r'^.{1,2083}$', "Failure URL must be between 1 and 2083 characters long"),
+            (r'^https://([\w\-]+\.)+[\w\-]+(/[\w\-./?%&=]*)?$', "Failure URL format is invalid")
+        ],
+        "pending_url": [
+            (r'^https://', "Pending URL must start with https://"),
+            (r'^.{1,2083}$', "Pending URL must be between 1 and 2083 characters long"),
+            (r'^https://([\w\-]+\.)+[\w\-]+(/[\w\-./?%&=]*)?$', "Pending URL format is invalid")
         ]
-
     }
 
     for field, rules in validators.items():

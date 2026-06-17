@@ -9,6 +9,7 @@ from config.file_config import *
 from config.input_config import *
 
 from config.providers.initialize_mongodb import initialize_mongodb
+from config.providers.initialize_mercadopago import initialize_mercadopago
 from config.providers.initialize_redis  import initialize_redis
 from config.providers.initialize_cloudinary  import initialize_cloudinary
 
@@ -51,6 +52,7 @@ class Server:
         self.jwt: JWTManager = JWTManager(self.app)
 
         mongo = initialize_mongodb()
+        mercadopago = initialize_mercadopago()
         redis = initialize_redis(self.app, self.user_or_ip)
         self.cloudinary = initialize_cloudinary() 
 
@@ -59,6 +61,10 @@ class Server:
         self.check_email_collection: Collection = mongo["check_email_collection"]
         self.users_collection: Collection = mongo["users_collection"]
         self.check_summarize_collection: Collection = mongo["check_summarize_collection"]
+        
+        self.mercadopago_sdk = mercadopago["mercadopago"]
+        self.mercadopago_webhook_secret = mercadopago["webhook_secret"]
+        self.plans = mercadopago['plans']
 
         self.redis_client = redis["redis_client"]
         self.limiter = redis["limiter"]
@@ -117,21 +123,32 @@ class Server:
 
         if not current_user:
             return True
-        
-        subscription_end = current_user.get('subscription_end', None)
-        
-        if subscription_end and datetime.now(timezone.utc) < subscription_end:
-            if current_user.get('is_free', True):
-                self.users_collection.update_one({"username": username}, {"$set": {"is_free": False}})
-            
+
+        subscription_end = current_user.get("subscription_end")
+
+        has_active_subscription = (
+            subscription_end is not None
+            and datetime.now(timezone.utc) < subscription_end
+        )
+
+        if has_active_subscription:
+            if current_user.get("is_free", True):
+                self.users_collection.update_one(
+                    {"username": username},
+                    {"$set": {"is_free": False}}
+                )
+
             return False
-                    
-        if not current_user.get('is_free', True):
-            self.users_collection.update_one({"username": username}, {"$set": {"is_free": True}})
-        
+
+        if not current_user.get("is_free", True):
+            self.users_collection.update_one(
+                {"username": username},
+                {"$set": {"is_free": True}}
+            )
+
         return True
-    
-    def user_or_ip(self) -> str:
+        
+    def user_or_ip(self) -> str | None:
             try:
                 verify_jwt_in_request()
                 identity = get_jwt_identity()
@@ -140,10 +157,16 @@ class Server:
                 
             except Exception:
                 endpoint = request.endpoint
-                if endpoint not in ('lectify_summarize', 'lectify_questions'):
+                endpoints_require = ['lectify_summarize', 'lectify_check_summarize', 'lectify_summarize_files', 
+                                    'lectify_summarize_files_by_id', 'lectify_questions','lectify_profile',
+                                    'lectify_refresh_token', 'lectify_update_profile', 'lectify_update_image_profile',
+                                    'lectify_ping_email_delete_account', 'lectify_pong_email_delete_account','lectify_ping_check_email_reset_password',
+                                    'lectify_pong_verify_email_reset_password', 'lectify_checkout']
+
+                if endpoint not in (endpoints_require):
                     return get_remote_address()
                 
-                return self.create_error_response("Unauthorized or invalid request")
+                return False
 
     def check_and_apply_block(self, current_user: str, increment: bool = True) -> Response | None:
         block_key = f"blocked:{current_user}"
@@ -211,7 +234,7 @@ class Server:
                     return response_check_and_apply_block
                             
                 if not current_user:
-                    return self.create_error_response("Unauthorized", 401)
+                    return self.create_error_response("You are not authorized to access this resource", 401)
 
                 data = request.get_json()
                 
@@ -313,7 +336,7 @@ class Server:
                     return response_check_and_apply_block
 
                 if not current_user:
-                    return self.create_error_response("Unauthorized", 401)
+                    return self.create_error_response("You are not authorized to access this resource", 401)
                 
                 data = request.get_json()
                 
@@ -388,7 +411,7 @@ class Server:
                     return response_check_and_apply_block
 
                 if not current_user:
-                    return self.create_error_response("Unauthorized", 401)
+                    return self.create_error_response("You are not authorized to access this resource", 401)
 
                 try:
                     file_documents_collection = self.documents_collection.find({
@@ -434,7 +457,7 @@ class Server:
                     return response_check_and_apply_block
 
                 if not current_user:
-                    return self.create_error_response("Unauthorized", 401)
+                    return self.create_error_response("You are not authorized to access this resource", 401)
 
                 try:
                     file_documents_collection = self.documents_collection.find_one({
@@ -466,7 +489,7 @@ class Server:
         @self.app.route('/lectify/questions', methods=['POST'])
         @jwt_required()
         @self.limiter.limit("5 per minute")
-        async def lectify_questions() -> Response:
+        def lectify_questions() -> Response:
             try:
                 current_user = self.user_or_ip()
 
@@ -475,7 +498,7 @@ class Server:
                     return response_check_and_apply_block
                                             
                 if not current_user:
-                    return self.create_error_response("Unauthorized", 401)
+                    return self.create_error_response("You are not authorized to access this resource", 401)
             
                 files = request.files.getlist('file')
 
@@ -536,7 +559,7 @@ class Server:
                             merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_markdown}'
                             
                             try:
-                                response_generative_ai = await GenerativeAI().start_chat(merged_prompt_questions)
+                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
                                 
                                 return jsonify(response_generative_ai_json), 200
@@ -557,7 +580,7 @@ class Server:
                             merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_pdf}'
                             
                             try:
-                                response_generative_ai = await GenerativeAI().start_chat(merged_prompt_questions)
+                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
 
                                 return jsonify(response_generative_ai_json), 200
@@ -806,6 +829,9 @@ class Server:
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
                                 
                 user_is_free = self.user_is_free(current_user)
                 current_info_user = self.get_user(current_user)
@@ -837,11 +863,14 @@ class Server:
         @self.limiter.limit("5 per minute")
         def lectify_refresh_token() -> Response:
             try:                
-                current_user = get_jwt_identity()
+                current_user = self.user_or_ip()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
                                                 
                 if not self.get_user(current_user):
                     return self.create_error_response("User not found", 404)
@@ -865,6 +894,9 @@ class Server:
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
                             
                 current_info_user = self.get_user(current_user)
                 
@@ -931,12 +963,14 @@ class Server:
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
                                 
                 current_info_user = self.get_user(current_user)
                 
                 if not current_info_user:
                     return self.create_error_response("User not found", 404)
-                
                 
                 files = request.files.getlist('file')
 
@@ -1026,6 +1060,9 @@ class Server:
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+                
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
                                 
                 current_info_user = self.get_user(current_user)
                 
@@ -1075,6 +1112,9 @@ class Server:
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+                
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
                                 
                 current_info_user = self.get_user(current_user)
                 
@@ -1125,6 +1165,9 @@ class Server:
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
                 
                 data = request.get_json()
 
@@ -1170,6 +1213,9 @@ class Server:
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
                 
                 data = request.get_json()
 
@@ -1211,6 +1257,122 @@ class Server:
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
-        
+
+        @self.app.route('/lectify/checkout', methods=['POST'])
+        @jwt_required()
+        @self.limiter.limit("10 per minute")
+        def lectify_checkout() -> Response:
+            try:
+                current_user = self.user_or_ip()
+                
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+                
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
+
+                current_info_user = self.get_user(current_user)
+                
+                if not current_info_user:
+                    return self.create_error_response("User account not found", 404)
+                
+                if not self.user_is_free(current_user):
+                    return self.create_error_response("User already has a paid plan", 400)
+            
+                data = request.get_json()
+                plan = data.get("plan", "").strip().lower()
+                success_url = data.get("success_url" , "").strip()
+                failure_url = data.get("failure_url", "").strip()
+                pending_url = data.get("pending_url", "").strip()
+
+                if not plan or plan not in self.plans:
+                    return self.create_error_response("Plan is required", 400)
+                
+                if not success_url or not failure_url or not pending_url:
+                    return self.create_error_response("Success, failure and pending URLs are required", 400)
+                
+                validation_error = validate_user_data({
+                    "success_url": success_url,
+                    "failure_url": failure_url,
+                    "pending_url": pending_url
+                })
+
+                if validation_error:
+                    return self.create_error_response(validation_error, 400)
+                
+                selected_plan = self.plans.get(plan)
+                price = selected_plan['price']
+                duration = selected_plan['duration']
+                email = current_info_user['email']
+
+                if not email:
+                    return self.create_error_response("No email address found for this account", 404)
+
+                preference_data = {
+                    "items": [
+                        {
+                            "title": "Lectify Premium",
+                            "quantity": 1,
+                            "unit_price": price
+                        }
+                    ],
+                    "payer": {
+                        "email": email
+                    },
+                    "external_reference": f"{current_user}:{plan}",
+                    "back_urls": {
+                        "success": success_url,
+                        "failure": failure_url,
+                        "pending": pending_url
+                    },
+                    "auto_return": "approved"
+                }
+
+                preference_response = self.mercadopago_sdk.preference().create(preference_data)
+                preference = preference_response["response"]
+            
+                return jsonify({'checkout_url': preference["init_point"]}), 200
+
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request.', 500)
+
+        @self.app.route('/lectify/webhook', methods=['POST'])
+        def lectify_webhook() -> Response:
+            try:
+                data = request.get_json()
+                payment_id = data["data"]["id"]
+                payment_response = self.mercadopago_sdk.payment().get(payment_id)
+
+                if payment_response["status"] != 200:
+                    return self.create_error_response('Failed to retrieve payment information from Mercado Pago.', 400)
+
+                payment = payment_response["response"]
+                external_reference = payment["external_reference"]
+                username, plan = external_reference.split(":")
+
+                user = self.get_user(username)
+
+                if user:
+                    duration = self.plans[plan]["duration"]
+                    now = datetime.now(timezone.utc)
+                    end_date = now + duration
+
+                    self.users_collection.update_one(
+                        {"username": username},
+                        {
+                            "$set": {
+                                "is_free": False,
+                                "plan": plan,
+                                "subscription_end": end_date
+                            }
+                        }
+                    )
+            
+                return jsonify({'message': 'Webhook processed successfully.'}), 200
+
+            except Exception:
+                return self.create_error_response('An error occurred while processing the request.', 500)
+                
     def run_production(self, host: str = '0.0.0.0', port: int = 5000) -> None:
         self.app.run(debug=False, host=host, port=port, use_reloader=False)

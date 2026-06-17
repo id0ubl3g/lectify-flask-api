@@ -45,6 +45,7 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
 - JWT-based authentication & refresh tokens
 - Email verification, password reset & account deletion flows
 - Profile management (including image upload via Cloudinary)
+- Mercado Pago subscription integration (monthly, 6 months, yearly plans)
 - Rate limiting & Redis caching
 - Interactive API docs with Flasgger
 
@@ -57,9 +58,9 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
   ├── config/
   │     └── providers/
   │       ├── initialize_cloudinary.py
+  │       ├── initialize_mercadopago.py
   │       ├── initialize_mongodb.py
   │       ├── initialize_redis.py
-  │       └── initialize_stripe.py
   │   ├── file_config.py
   │   ├── input_config.py
   │   ├── path_config.py
@@ -89,16 +90,17 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
   ├── .env.example
   ├── .gitignore
   ├── docker-compose.yml
+  ├── install.sh
   ├── LICENSE
+  ├── makefile
   ├── README.md
   ├── requirements.txt
-  ├── run.py
-  └── start.sh
+  └── run.py
 ```
 
 ## Prerequisites
 
-To run the Lectify Flask API, use Ubuntu 20.04, 22.04, or 24.04 (or a similar Debian-based system) with Python 3.10 or higher. The environment must include Docker and Docker Compose for containerized services, Redis for caching and rate limiting, RabbitMQ for asynchronous queue processing, FFmpeg for media processing, and internet access for external services such as AI APIs, email SMTP, Stripe, Cloudinary, and Google Cloud services. Ensure all dependencies are properly installed before running the application.
+To run the Lectify Flask API, use Ubuntu 20.04, 22.04, or 24.04 (or a similar Debian-based system) with Python 3.10 or higher. The environment must include Docker and Docker Compose for containerized services, Redis for caching and rate limiting, RabbitMQ for asynchronous queue processing, FFmpeg for media processing, and internet access for external services such as AI APIs, email SMTP, Mercado Pago, Cloudinary, and Google Cloud services. Ensure all dependencies are properly installed before running the application.
 
 ### Manual Installation (Ubuntu/Debian)
 
@@ -130,6 +132,7 @@ Edit .env (use nano .env or your editor) and fill in:
 - API keys (YouTube, Gemini, etc.)
 - RabbitMQ user and password
 - Email SMTP settings
+- Mercado Pago keys
 - MongoDB connection
 - Cloudinary (for profile images)
 Base URLs, etc.
@@ -186,6 +189,8 @@ Interactive API Documentation: [http://127.0.0.1:5000/apidocs/](http://127.0.0.1
 | `DELETE` | `/lectify/pong_email_delete_account` | Verifies token and deletes user account.                    |
 | `POST`   | `/lectify/ping_email_reset_password` | Sends password reset link via email.                        |
 | `POST`   | `/lectify/pong_email_reset_password` | Verifies token and updates password.                        |
+| `POST`   | `/lectify/checkout`                  | Creates checkout session for paid plan.              |
+| `POST`   | `/lectify/webhook`                   | Stripe webhook to process payments (internal).              |
 
 
 ### Core Endpoints
