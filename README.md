@@ -24,12 +24,12 @@
 - [Manual Installation (Ubuntu/Debian)](#manual-installation-ubuntudebian)
 - [Running the Application](#running-the-application)
 - [API Documentation](#api-documentation)
-- [Endpoints](#endpoints)
-- [Core Endpoints](#core-endpoints)
-  - [Lectify Summarize Endpoint](#lectify-summarize-endpoint)
-  - [Lectify Check Summarize Endpoint](#lectify-check-summarize-endpoint)
-- [Example Use Case](#example-use-case)
-  - [Frontend Integration Summarize](#frontend-integration-summarize)
+  - [Endpoints](#endpoints)
+  - [Core Endpoints](#core-endpoints)
+    - [Lectify Summarize Endpoint](#lectify-summarize-endpoint)
+    - [Lectify Check Summarize Endpoint](#lectify-check-summarize-endpoint)
+  - [Example Use Case](#example-use-case)
+    - [Frontend Integration Summarize](#frontend-integration-summarize)
 - [Acknowledgments](#acknowledgments)
 - [License](#license)
 
@@ -47,7 +47,6 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
 - Profile management (including image upload via Cloudinary)
 - Mercado Pago subscription integration (monthly, 6 months, yearly plans)
 - Rate limiting & Redis caching
-- Interactive API docs with Flasgger
 
 ## Project Structure
 
@@ -65,8 +64,6 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
   │   ├── input_config.py
   │   ├── path_config.py
   │   ├── prompt_config.py
-  ├── docs/
-  │   └── flasgger.py
   ├── src/
   │   ├── api/
   │   │   └── app.py
@@ -163,10 +160,6 @@ make run
 The `make run` command automatically sets up the virtual environment, installs dependencies, starts Docker services, launches the Flask API, and runs the Summarize Worker.
 
 ## API Documentation
-
-The Lectify Flask API includes interactive documentation powered by Flasgger. You can explore each endpoint, view parameter details, and test API requests directly from the browser.
-
-Interactive API Documentation: [http://127.0.0.1:5000/apidocs/](http://127.0.0.1:5000/apidocs/)
 
 ### Endpoints
 

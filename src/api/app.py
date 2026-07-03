@@ -4,7 +4,6 @@ from src.modules.extract_text import ExtractText
 from src.rabbitmq.publisher import publish_message
 
 from config.prompt_config import prompt_questions
-from docs.flasgger import init_flasgger
 from config.file_config import *
 from config.input_config import *
 
@@ -96,8 +95,7 @@ class Server:
         self.max_url_length: int = 200
 
         self._register_routes()
-        init_flasgger(self.app)
-
+        
     def create_error_response(self, message: str, code: int) -> Response:
         return jsonify({'error': message}), code
 
@@ -210,7 +208,7 @@ class Server:
 
             if endpoint in ("lectify_summarize", "lectify_questions"):
                 if self.user_is_free(current_user):
-                    return self.create_error_response("Monthly free plan limit exceeded.", 429)
+                    return self.create_error_response("Too many requests. Please try again later or upgrade your plan to continue using this feature.", 429)
 
             return self.create_error_response("Too many requests. Please try again later.", 429)
         
@@ -232,9 +230,15 @@ class Server:
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+
+                if self.user_is_free(current_user):
+                    return self.create_error_response("Upgrade your plan to continue using this feature.") 
                             
                 if not current_user:
                     return self.create_error_response("You are not authorized to access this resource", 401)
+
+                if not self.get_user(current_user):
+                    return self.create_error_response("User not found", 404)
 
                 data = request.get_json()
                 
@@ -335,8 +339,14 @@ class Server:
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
 
+                if self.user_is_free(current_user):
+                    return self.create_error_response("Upgrade your plan to continue using this feature.") 
+
                 if not current_user:
                     return self.create_error_response("You are not authorized to access this resource", 401)
+
+                if not self.get_user(current_user):
+                    return self.create_error_response("User not found", 404)
                 
                 data = request.get_json()
                 
@@ -413,6 +423,9 @@ class Server:
                 if not current_user:
                     return self.create_error_response("You are not authorized to access this resource", 401)
 
+                if not self.get_user(current_user):
+                    return self.create_error_response("User not found", 404)
+
                 try:
                     file_documents_collection = self.documents_collection.find({
                         "username": current_user
@@ -459,6 +472,9 @@ class Server:
                 if not current_user:
                     return self.create_error_response("You are not authorized to access this resource", 401)
 
+                if not self.get_user(current_user):
+                    return self.create_error_response("User not found", 404)
+
                 try:
                     file_documents_collection = self.documents_collection.find_one({
                         "_id": ObjectId(file_id)
@@ -496,9 +512,15 @@ class Server:
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
                     return response_check_and_apply_block
+
+                if self.user_is_free(current_user):
+                    return self.create_error_response("Upgrade your plan to continue using this feature.") 
                                             
                 if not current_user:
                     return self.create_error_response("You are not authorized to access this resource", 401)
+
+                if not self.get_user(current_user):
+                    return self.create_error_response("User not found", 404)
             
                 files = request.files.getlist('file')
 
@@ -863,7 +885,7 @@ class Server:
         @self.limiter.limit("5 per minute")
         def lectify_refresh_token() -> Response:
             try:                
-                current_user = self.user_or_ip()
+                current_user = get_jwt_identity()
                 
                 response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
                 if response_check_and_apply_block:
@@ -1275,7 +1297,7 @@ class Server:
                 current_info_user = self.get_user(current_user)
                 
                 if not current_info_user:
-                    return self.create_error_response("User account not found", 404)
+                    return self.create_error_response("User not found", 404)
                 
                 if not self.user_is_free(current_user):
                     return self.create_error_response("User already has a paid plan", 400)
