@@ -11,18 +11,18 @@ def initialize_mercadopago() -> dict:
     plans = {
         "1_month": {
             "name": "1 Month",
-            "price": 0.1,
-            "duration": timedelta(days=30)
+            "price": 19.90,
+            "days": 30
         },
         "6_months": {
             "name": "6 Months",
-            "price": 149.90,
-            "duration": timedelta(days=180)
+            "price": 99.90,
+            "days": 180
         },
         "1_year": {
             "name": "1 Year",
-            "price": 249.90,
-            "duration": timedelta(days=365)
+            "price": 179.90,
+            "days": 365
         }
     }
 

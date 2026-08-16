@@ -827,11 +827,11 @@ class Server:
                     if not isinstance(value, str):
                         return create_error_response(f"{field} must be a string"), 400
                 
-                username = username.strip().lower()
-                password = password.strip()
-                email = email.strip().lower()
-                firstname = firstname.strip().capitalize()
-                lastname = lastname.strip().capitalize()
+                username = fields["username"].strip().lower()
+                password = fields["password"].strip()
+                email = fields["email"].strip().lower()
+                firstname = fields["firstname"].strip().capitalize()
+                lastname = fields["lastname"].strip().capitalize()
 
                 if not username or not password or not email or not firstname or not lastname:
                     return self.create_error_response("Username, password, email, firstname and lastname are required", 400)
@@ -1583,24 +1583,38 @@ class Server:
                 
                 selected_plan = self.plans.get(plan)
                 price = selected_plan['price']
-                duration = selected_plan['duration']
                 email = current_info_user['email']
 
                 if not email:
                     return self.create_error_response("No email address found for this account", 404)
+
+                transaction_id = str(uuid.uuid4())
+                now = datetime.now(timezone.utc)
+                
+                self.transactions_collection.insert_one({
+                    "transaction_id": transaction_id,
+                    "uid": current_user,
+                    "plan": plan,
+                    "amount": price,
+                    "status": "pending",
+                    "mercadopago_payment_id": None,
+                    "created_at": now,
+                    "expires_at": now + timedelta(days=30)
+                })
 
                 preference_data = {
                     "items": [
                         {
                             "title": "Lectify Premium",
                             "quantity": 1,
-                            "unit_price": price
+                            "unit_price": price,
+                            "currency_id": "BRL"
                         }
                     ],
                     "payer": {
                         "email": email
                     },
-                    "external_reference": f"{current_user}:{plan}",
+                    "external_reference": f"{current_user}:{plan}:{transaction_id}",
                     "back_urls": {
                         "success": success_url,
                         "failure": failure_url,
@@ -1611,6 +1625,16 @@ class Server:
 
                 preference_response = self.mercadopago_sdk.preference().create(preference_data)
                 preference = preference_response["response"]
+
+                self.transactions_collection.update_one(
+                    {"transaction_id": transaction_id},
+                    {
+                        "$set": {
+                            "preference_id": str(preference["id"]),
+                            "checkout_url": preference["init_point"]
+                        }
+                    }
+                )
             
                 return jsonify({'checkout_url': preference["init_point"]}), 200
 
@@ -1620,37 +1644,131 @@ class Server:
         @self.app.route('/lectify/webhook', methods=['POST'])
         def lectify_webhook() -> Response:
             try:
-                data = request.get_json()
-                payment_id = data["data"]["id"]
+                data = request.get_json(silent=True) or {}
+
+                payment_id = (
+                    data.get("data", {}).get("id")
+                    or request.args.get("data.id")
+                )
+
+                if not payment_id:
+                    return self.create_error_response("Payment ID not found", 400)
+
                 payment_response = self.mercadopago_sdk.payment().get(payment_id)
 
                 if payment_response["status"] != 200:
                     return self.create_error_response('Failed to retrieve payment information from Mercado Pago.', 400)
 
                 payment = payment_response["response"]
-                external_reference = payment["external_reference"]
-                username, plan = external_reference.split(":")
+                status = payment.get("status")
 
-                user = self.get_user(username)
+                external_reference = payment.get("external_reference")
 
-                if user:
-                    duration = self.plans[plan]["duration"]
-                    now = datetime.now(timezone.utc)
-                    end_date = now + duration
+                if not external_reference:
+                    return self.create_error_response("External reference not found", 400)
+                
+                parts = external_reference.split(":")
 
-                    self.users_collection.update_one(
-                        {"username": username},
+                if len(parts) != 3:
+                    return self.create_error_response("Invalid external reference", 400)
+
+                uid, plan, transaction_id = parts
+
+                if plan not in self.plans:
+                    return self.create_error_response("Invalid plan", 400)
+
+                transaction = self.transactions_collection.find_one({"transaction_id": transaction_id})
+
+                if not transaction:
+                    return self.create_error_response("Transaction not found", 404)
+
+                if status == "refunded":
+                    self.transactions_collection.update_one(
+                        {"transaction_id": transaction_id},
                         {
                             "$set": {
-                                "is_free": False,
-                                "plan": plan,
-                                "subscription_end": end_date
+                                "status": "refunded",
+                                "refunded_at": datetime.now(timezone.utc),
+                                "mercadopago_payment_id": str(payment_id)
                             }
                         }
                     )
-            
-                return jsonify({'message': 'Webhook processed successfully.'}), 200
 
+                    self.users_collection.update_one(
+                        {
+                            "uid": uid,
+                            "mercadopago_payment_id": str(payment_id)
+                        },
+                        {
+                            "$set": {
+                                "is_free": True,
+                                "plan": None,
+                                "subscription_end": None
+                            },
+                            "$unset": {
+                                "mercadopago_payment_id": "",
+                            }
+                        }
+                    )
+
+                    return jsonify({
+                        "message": "Payment refunded and plan revoked",
+                        "status": "refunded"
+                    }), 200
+
+                if status != "approved":
+                    return jsonify({
+                        "message": "Payment not approved",
+                        "status": status
+                    }), 200
+
+                if transaction.get("status") == "approved":
+                    return jsonify({"message": "Payment already processed"}), 200
+
+                current_info_user = self.get_user(uid)
+
+                if not current_info_user:
+                    return self.create_error_response("User not found", 404)
+
+                expected_price = Decimal(str(self.plans[plan]["price"]))
+                paid_price = Decimal(str(payment.get("transaction_amount")))
+
+                if paid_price != expected_price:
+                    return self.create_error_response("Payment amount does not match the plan price", 400)
+
+                selected_plan = self.plans[plan]
+
+                self.transactions_collection.update_one(
+                    {"transaction_id": transaction_id},
+                    {
+                        "$set": {
+                            "status": "approved",
+                            "mercadopago_payment_id": str(payment_id),
+                            "approved_at": datetime.now(timezone.utc)
+                        },
+                        "$unset": {
+                            "expires_at": ""
+                        }
+                    }
+                )
+                
+                self.users_collection.update_one(
+                    {"uid": uid},
+                    {
+                        "$set": {
+                            "is_free": False,
+                            "plan": plan,
+                            "subscription_end": datetime.now(timezone.utc) + timedelta(days=selected_plan["days"]),
+                            "mercadopago_payment_id": str(payment_id),
+                        }
+                    }
+                )
+        
+                return jsonify({
+                    "message": "Payment approved and plan activated",
+                    "status": "approved",
+                    "plan": plan
+                }), 200
             except Exception:
                 return self.create_error_response('An error occurred while processing the request.', 500)
                 

@@ -25,6 +25,10 @@ def initialize_mongodb():
     check_summarize_collection = db["check_summarize"]
     check_summarize_collection.create_index("timestamp", expireAfterSeconds=1296000)
 
+    transactions_collection = db["transactions_collection"]
+    transactions_collection.create_index("transaction_id",unique=True)
+    transactions_collection.create_index("expires_at", expireAfterSeconds=0)
+
     return {
         "client": client,
         "db": db,
@@ -32,5 +36,6 @@ def initialize_mongodb():
         "documents_collection": documents_collection,
         "check_email_collection": check_email_collection,
         "users_collection": users_collection,
-        "check_summarize_collection": check_summarize_collection
+        "check_summarize_collection": check_summarize_collection,
+        "transactions_collection": transactions_collection
     }
