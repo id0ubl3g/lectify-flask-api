@@ -117,13 +117,15 @@ Follow the official Docker installation guide:
 
 [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/)
 
+## Environment Configuration
+
 Configure environment variables
 
 ```sh
 cp .env.example .env
 ```
 
-Edit .env (use nano .env or your editor) and fill in:
+Configure the required environment variables in `.env`, including:
 
 - SECRET_KEY
 - API keys (YouTube, Gemini, etc.)
@@ -133,6 +135,8 @@ Edit .env (use nano .env or your editor) and fill in:
 - MongoDB connection
 - Cloudinary (for profile images)
 Base URLs, etc.
+
+Sensitive credentials should not be committed to the repository.
 
 To enable the Speech-to-Text feature, it is required to configure the Google Cloud service account JSON file.
 

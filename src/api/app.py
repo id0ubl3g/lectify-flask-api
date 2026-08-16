@@ -47,6 +47,7 @@ class Server:
         self.app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
         self.app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
         self.app.config['RATELIMIT_STORAGE_URI'] = os.getenv("REDIS_URL")
+        self.app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
 
         self.jwt: JWTManager = JWTManager(self.app)
 
@@ -241,9 +242,17 @@ class Server:
                     return self.create_error_response("User not found", 404)
 
                 data = request.get_json()
-                
+
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
                 if not data:
                     return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
                 
                 missing_fields = [field for field in self.required_fields if field not in data]
                 if missing_fields:
@@ -254,8 +263,23 @@ class Server:
                 output_format = data.get('output_format')
                 language_select = data.get('language_select')
                 
+                if not isinstance(youtube_url, str):
+                    return {"error": "Youtube Url client must be a string"}, 400
+
+                if not isinstance(output_format, str):
+                    return {"error": "Output Format Url client must be a string"}, 400
+
+                if not isinstance(language_select, str):
+                    return {"error": "Language Select client must be a string"}, 400
+
                 if not youtube_url:
                     return self.create_error_response('Missing YouTube URL', 400)
+
+                if not output_format:
+                    return self.create_error_response('Missing output format', 400)
+
+                if not language_select:
+                    return self.create_error_response('Missing language selection', 400)
                 
                 if len(youtube_url) > self.max_url_length:
                     return self.create_error_response(f'URL exceeds maximum length of {self.max_url_length} characters', 400)
@@ -266,14 +290,8 @@ class Server:
                 if not re.match(self.youtube_regex, youtube_url):
                     return self.create_error_response('Invalid YouTube URL', 400)
                 
-                if not output_format:
-                    return self.create_error_response('Missing output format', 400)
-                
                 if output_format not in self.valid_formats:
                     return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_formats)}", 400)
-                
-                if not language_select:
-                    return self.create_error_response('Missing language selection', 400)
                 
                 if language_select not in self.valid_languages_formats:
                     return self.create_error_response(f"Invalid format. Supported formats: {', '.join(self.valid_languages_formats)}", 400)
@@ -350,8 +368,16 @@ class Server:
                 
                 data = request.get_json()
                 
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
                 if not data:
                     return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
                 
                 missing_fields = [field for field in self.required_fields if field not in data]
                 if missing_fields:
@@ -362,8 +388,23 @@ class Server:
                 output_format = data.get('output_format')
                 language_select = data.get('language_select')
 
+                if not isinstance(youtube_url, str):
+                    return {"error": "Language Select client must be a string"}, 400
+
+                if not isinstance(output_format, str):
+                    return {"error": "Language Select client must be a string"}, 400
+
+                if not isinstance(language_select, str):
+                    return {"error": "Language Select client must be a string"}, 400
+
                 if not youtube_url:
                     return self.create_error_response('Missing YouTube URL', 400)
+
+                if not output_format:
+                    return self.create_error_response('Missing output format', 400)
+
+                if not language_select:
+                    return self.create_error_response('Missing language selection', 400)
                 
                 if len(youtube_url) > self.max_url_length:
                     return self.create_error_response(f'URL exceeds maximum length of {self.max_url_length} characters', 400)
@@ -524,12 +565,12 @@ class Server:
             
                 files = request.files.getlist('file')
 
-                if len(files) > 1:
+                if len(files) != 1:
                     return self.create_error_response('Exactly one file must be uploaded', 400)
 
                 received_file = files[0]
 
-                if not received_file:
+                if not received_file.filename:
                     return self.create_error_response('No files received', 400)
 
                 file_size_bytes = len(received_file.read())
@@ -628,11 +669,27 @@ class Server:
                                 
                 data = request.get_json()
 
-                email = (data.get("email") or "").lower().strip()
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
+                email = data.get("email")
+                
+                if not isinstance(language_select, str):
+                    return {"error": "Language Select client must be a string"}, 400
 
                 if not email:
                     return self.create_error_response("Email is required", 400)
                 
+                email = email.strip().lower()
+
                 if not is_valid_email(email):
                     return self.create_error_response("Invalid email format", 400)
                 
@@ -673,11 +730,31 @@ class Server:
                                 
                 data = request.get_json()
 
-                email = (data.get("email") or "").lower().strip()
-                code = (data.get("code") or "").upper().strip()
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
+                email = data.get("email")
+                code = data.get("code")
+
+                if not isinstance(email, str):
+                    return {"error": "Email must be a string"}, 400
+
+                if not isinstance(code, str):
+                    return {"error": "Code must be a string"}, 400
 
                 if not email or not code:
                     return self.create_error_response("Email and code are required", 400)
+
+                email = email.strip().lower()
+                code = code.strip().lower()
                 
                 if not is_valid_email(email):
                     return self.create_error_response("Invalid email format", 400)
@@ -721,17 +798,43 @@ class Server:
                             
                 data = request.get_json()
 
-                username = (data.get("username") or "").lower().strip()
-                password = (data.get("password") or "").strip()
-                email = (data.get("email") or "").lower().strip()
-                firstname = (data.get("firstname") or "").strip().capitalize()
-                lastname = (data.get("lastname") or "").strip().capitalize()
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
+                username = data.get("username")
+                password = data.get("password")
+                email = data.get("email")
+                firstname = data.get("firstname")
+                lastname = data.get("lastname")
+
+                fields = {
+                    "username": username,
+                    "password": password,
+                    "email": email,
+                    "firstname": firstname,
+                    "lastname": lastname
+                }
+
+                for field, value in fields.items():
+                    if not isinstance(value, str):
+                        return create_error_response(f"{field} must be a string"), 400
                 
+                username = username.strip().lower()
+                password = password.strip()
+                email = email.strip().lower()
+                firstname = firstname.strip().capitalize()
+                lastname = lastname.strip().capitalize()
+
                 if not username or not password or not email or not firstname or not lastname:
                     return self.create_error_response("Username, password, email, firstname and lastname are required", 400)
-                
-                if self.get_user(username):
-                    return self.create_error_response("Username already exists", 400)
                 
                 if self.get_email(email):
                     return self.create_error_response("Email already exists", 400)
@@ -783,18 +886,42 @@ class Server:
                                 
                 data = request.get_json()
 
-                username = (data.get("username") or "").lower().strip()
-                email = (data.get("email") or "").lower().strip()
-                password = (data.get("password") or "").strip()
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
 
-                if email and not is_valid_email(email):
-                    return self.create_error_response("Invalid email format", 400)
-                
-                if not password:
-                    return self.create_error_response("Password is required", 400)
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
+                username = data.get("username")
+                email = data.get("email")
+                password = data.get("password")
+
+                if username and not isinstance(username, str):
+                    return create_error_response("Username must be a string"), 400
+
+                if email and not isinstance(email, str):
+                    return create_error_response("Email must be a string"), 400
+
+                if password and not isinstance(password, str):
+                    return create_error_response("Password must be a string"), 400
+
+                username = username.strip().lower()
+                email = email.strip().lower()
+                password = password.strip()
 
                 if not username and not email:
                     return self.create_error_response("You must provide either a username or an email", 400)
+
+                if not password:
+                    return self.create_error_response("Password is required", 400)
+
+                if not is_valid_email(email):
+                    return self.create_error_response("Invalid email format", 400)
                 
                 if email:
                     user_data = self.get_email(email)
@@ -927,6 +1054,29 @@ class Server:
                 
                 data = request.get_json()
 
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
+                if "firstname" in data:
+                    if not isinstance(data["firstname"], str):
+                        return {"error": "Firstname must be a string"}, 400
+
+                if "lastname" in data:
+                    if not isinstance(data["lastname"], str):
+                        return {"error": "Lastname must be a string"}, 400
+
+                if "password" in data:
+                    if not isinstance(data["password"], str):
+                        return {"error": "Password must be a string"}, 400
+
                 update_fields = {}
 
                 if "firstname" in data:
@@ -936,6 +1086,7 @@ class Server:
                     if not data['firstname'].strip():
                         return self.create_error_response("Firstname cannot be empty", 400)
                     
+
                     update_fields['firstname'] = data['firstname'].strip().capitalize()
                 
                 if "lastname" in data:
@@ -1008,6 +1159,9 @@ class Server:
                     return jsonify({'message': 'Profile image removed successfully'}), 200
 
                 received_file = files[0]
+
+                if not received_file.filename:
+                    return self.create_error_response('No files received', 400)
 
                 received_file.stream.seek(0, os.SEEK_END)
                 file_size = received_file.stream.tell()
@@ -1095,6 +1249,17 @@ class Server:
 
                 data = request.get_json()
 
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
                 base_url = (data.get("base_url") or "").lower().strip()
                 reset_password_page_url = (data.get("reset_password_page_url") or "").lower().strip()
 
@@ -1147,10 +1312,26 @@ class Server:
                 
                 data = request.get_json()
 
-                token = (data.get("token") or "").strip()
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
+                token = data.get("token")
+
+                if not isinstance(token, str):
+                    return {"error": "Token must be a string"}, 400
 
                 if not token:
                     return self.create_error_response("Token is required", 400)
+
+                token = token.strip()
                 
                 check_email_data = self.check_email_collection.find_one({"email": email})
 
@@ -1193,9 +1374,33 @@ class Server:
                 
                 data = request.get_json()
 
-                email = (data.get("email") or "").lower().strip()
-                base_url = (data.get("base_url") or "").lower().strip()
-                reset_password_page_url = (data.get("reset_password_page_url") or "").lower().strip()
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
+                email = data.get("email")
+                base_url = data.get("base_url")
+                reset_password_page_url = data.get("reset_password_page_url")
+
+                if not isinstance(email, str):
+                    return create_error_response("Email must be a string"), 400
+
+                if not isinstance(base_url, str):
+                    return create_error_response("Base Url must be a string"), 400
+
+                if not isinstance(reset_password_page_url, str):
+                    return create_error_response("Reset Password Page Url must be a string"), 400
+
+                email = email.strip().lower()
+                base_url = base_url.strip().lower()
+                reset_password_page_url = reset_password_page_url.strip().lower()
 
                 if not email or not base_url or not reset_password_page_url:
                     return self.create_error_response("Email, Base URL and Reset Password Page URL are required", 400)
@@ -1241,9 +1446,33 @@ class Server:
                 
                 data = request.get_json()
 
-                email = (data.get("email") or "").lower().strip()
-                token = (data.get("token") or "").strip()
-                new_password = (data.get("new_password") or "").strip()
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
+                email = data.get("email")
+                token = data.get("token")
+                new_password = data.get("new_password")
+
+                if not isinstance(email, str):
+                    return create_error_response("Email must be a string"), 400
+
+                if not isinstance(token, str):
+                    return create_error_response("Token must be a string"), 400
+
+                if not isinstance(new_password, str):
+                    return create_error_response("New Password must be a string"), 400
+
+                email = email.strip().lower()
+                token = token.strip()
+                new_password = new_password.strip()
 
                 if not email or not token or not new_password:
                     return self.create_error_response("Email, Token, and new password are required", 400)
@@ -1303,10 +1532,39 @@ class Server:
                     return self.create_error_response("User already has a paid plan", 400)
             
                 data = request.get_json()
-                plan = data.get("plan", "").strip().lower()
-                success_url = data.get("success_url" , "").strip()
-                failure_url = data.get("failure_url", "").strip()
-                pending_url = data.get("pending_url", "").strip()
+
+                if not isinstance(data, dict):
+                    return create_error_response("Request body must be a JSON object", 400)
+
+                if not data:
+                    return self.create_error_response('No data provided', 400)
+
+                unknown_fields = set(data.keys()) - ALLOWED_FIELDS
+
+                if unknown_fields:
+                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    
+                plan = data.get("plan")
+                success_url = data.get("success_url")
+                failure_url = data.get("failure_url")
+                pending_url = data.get("pending_url")
+
+                fields = {
+                    "plan": plan,
+                    "success_url": success_url,
+                    "failure_url": failure_url,
+                    "pending_url": pending_url
+                }
+
+                for field, value in fields.items():
+                    if not isinstance(value, str):
+                        return self.create_error_response(
+                            f"{field} must be a string", 400)
+
+                plan = fields["plan"].strip().lower()
+                success_url = fields["success_url"].strip()
+                failure_url = fields["failure_url"].strip()
+                pending_url = fields["pending_url"].strip()
 
                 if not plan or plan not in self.plans:
                     return self.create_error_response("Plan is required", 400)
