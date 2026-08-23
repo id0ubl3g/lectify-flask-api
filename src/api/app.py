@@ -1124,9 +1124,16 @@ class Server:
                 if not update_fields:
                     return self.create_error_response("No fields to update", 400)
                 
-                self.users_collection.update_one({"username": current_user}, {"$set": update_fields})
+                result = self.users_collection.update_one({"username": current_user}, {"$set": update_fields})
+
+                if result.matched_count == 0:
+                    return self.create_error_response("Client not found", 404)
                 
-                return jsonify({"message": "Profile updated successfully"}), 200
+                return jsonify({
+                    "message": "Profile updated successfully",
+                    "updated_fields": list(update_fields.keys()),
+                    "modified": result.modified_count > 0
+                }), 200
             
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
