@@ -1,6 +1,9 @@
 from email_validator import validate_email, EmailNotValidError
 
+from pathlib import Path
 import unicodedata
+import json
+import sys
 import re
 import os
 
@@ -85,3 +88,31 @@ def sanitize_filename(name: str, max_length: int = 120) -> str:
     name = re.sub(r"_+", "_", name).strip("_")
 
     return name[:max_length]
+
+def create_google_credentials() -> str:
+    try:
+        credentials = {
+            "type": os.environ["GOOGLE_TYPE"],
+            "project_id": os.environ["GOOGLE_PROJECT_ID"],
+            "private_key_id": os.environ["GOOGLE_PRIVATE_KEY_ID"],
+            "private_key": os.environ["GOOGLE_PRIVATE_KEY"].replace("\\n", "\n"),
+            "client_email": os.environ["GOOGLE_CLIENT_EMAIL"],
+            "client_id": os.environ["GOOGLE_CLIENT_ID"],
+            "auth_uri": os.environ["GOOGLE_AUTH_URI"],
+            "token_uri": os.environ["GOOGLE_TOKEN_URI"],
+            "auth_provider_x509_cert_url": os.environ["GOOGLE_AUTH_PROVIDER_X509_CERT_URL"],
+            "client_x509_cert_url": os.environ["GOOGLE_CLIENT_X509_CERT_URL"],
+            "universe_domain": os.environ["GOOGLE_UNIVERSE_DOMAIN"],
+        }
+
+    except Exception:
+        print('Error occurred while creating Google credentials')
+        sys.exit(1)
+
+
+    path = Path("config/misa-flask-api-501622-91fd8aef25fd.json")
+
+    with path.open("w") as file:
+        json.dump(credentials, file, indent=2)
+
+    return path
