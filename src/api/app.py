@@ -331,7 +331,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -339,7 +339,7 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
                 
                 missing_fields = [field for field in self.required_fields if field not in data]
                 if missing_fields:
@@ -456,7 +456,7 @@ class Server:
                 data = request.get_json()
                 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -464,7 +464,7 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
                 
                 missing_fields = [field for field in self.required_fields if field not in data]
                 if missing_fields:
@@ -758,7 +758,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -766,12 +766,12 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
 
                 email = data.get("email")
                 
-                if not isinstance(language_select, str):
-                    return {"error": "Language Select client must be a string"}, 400
+                if not isinstance(email, str):
+                    return self.create_error_response("Email must be a string", 400)
 
                 if not email:
                     return self.create_error_response("Email is required", 400)
@@ -819,7 +819,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -827,7 +827,7 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
 
                 email = data.get("email")
                 code = data.get("code")
@@ -887,7 +887,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -895,7 +895,7 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
 
                 username = data.get("username")
                 password = data.get("password")
@@ -913,7 +913,7 @@ class Server:
 
                 for field, value in fields.items():
                     if not isinstance(value, str):
-                        return create_error_response(f"{field} must be a string"), 400
+                        return self.create_error_response(f"{field} must be a string"), 400
                 
                 username = fields["username"].strip().lower()
                 password = fields["password"].strip()
@@ -975,7 +975,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -983,20 +983,20 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
 
                 username = data.get("username")
                 email = data.get("email")
                 password = data.get("password")
 
                 if username and not isinstance(username, str):
-                    return create_error_response("Username must be a string"), 400
+                    return self.create_error_response("Username must be a string"), 400
 
                 if email and not isinstance(email, str):
-                    return create_error_response("Email must be a string"), 400
+                    return self.create_error_response("Email must be a string"), 400
 
                 if password and not isinstance(password, str):
-                    return create_error_response("Password must be a string"), 400
+                    return self.create_error_response("Password must be a string"), 400
 
                 username = username.strip().lower()
                 email = email.strip().lower()
@@ -1144,7 +1144,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -1152,7 +1152,7 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
 
                 if "firstname" in data:
                     if not isinstance(data["firstname"], str):
@@ -1339,7 +1339,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -1347,7 +1347,7 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
 
                 base_url = (data.get("base_url") or "").lower().strip()
                 reset_password_page_url = (data.get("reset_password_page_url") or "").lower().strip()
@@ -1402,7 +1402,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -1410,7 +1410,7 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
 
                 token = data.get("token")
 
@@ -1464,7 +1464,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -1472,20 +1472,20 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
 
                 email = data.get("email")
                 base_url = data.get("base_url")
                 reset_password_page_url = data.get("reset_password_page_url")
 
                 if not isinstance(email, str):
-                    return create_error_response("Email must be a string"), 400
+                    return self.create_error_response("Email must be a string"), 400
 
                 if not isinstance(base_url, str):
-                    return create_error_response("Base Url must be a string"), 400
+                    return self.create_error_response("Base Url must be a string"), 400
 
                 if not isinstance(reset_password_page_url, str):
-                    return create_error_response("Reset Password Page Url must be a string"), 400
+                    return self.create_error_response("Reset Password Page Url must be a string"), 400
 
                 email = email.strip().lower()
                 base_url = base_url.strip().lower()
@@ -1536,7 +1536,7 @@ class Server:
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -1544,20 +1544,20 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
 
                 email = data.get("email")
                 token = data.get("token")
                 new_password = data.get("new_password")
 
                 if not isinstance(email, str):
-                    return create_error_response("Email must be a string"), 400
+                    return self.create_error_response("Email must be a string"), 400
 
                 if not isinstance(token, str):
-                    return create_error_response("Token must be a string"), 400
+                    return self.create_error_response("Token must be a string"), 400
 
                 if not isinstance(new_password, str):
-                    return create_error_response("New Password must be a string"), 400
+                    return self.create_error_response("New Password must be a string"), 400
 
                 email = email.strip().lower()
                 token = token.strip()
