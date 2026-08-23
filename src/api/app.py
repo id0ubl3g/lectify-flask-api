@@ -1225,7 +1225,10 @@ class Server:
                 if not image_url:
                     return self.create_error_response('Error uploading image to Cloudinary', 500)
                 
-                self.users_collection.update_one({"username": current_user}, {"$set": {"image_profile": image_url}})
+                result = self.users_collection.update_one({"username": current_user}, {"$set": {"image_profile": image_url}})
+
+                if not result.modified_count:
+                    return self.create_error_response('Error updating user profile image', 500)
 
                 return jsonify({"message": "Profile image updated successfully", "image_profile": image_url}), 200
                 

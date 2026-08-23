@@ -110,7 +110,7 @@ def create_google_credentials() -> str:
         sys.exit(1)
 
 
-    path = Path("config/misa-flask-api-501622-91fd8aef25fd.json")
+    path = Path("config/lofty-entropy-465701-u3-279b20bee809.json")
 
     with path.open("w") as file:
         json.dump(credentials, file, indent=2)
