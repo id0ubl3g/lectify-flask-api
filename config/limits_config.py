@@ -1,0 +1,1 @@
+ABUSE_LIMIT = "5 per minute"

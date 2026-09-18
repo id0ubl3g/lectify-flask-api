@@ -5,10 +5,11 @@ from src.rabbitmq.publisher import publish_message
 
 from config.prompt_config import prompt_questions
 from config.file_config import *
+from config.limits_config import *
 from config.input_config import *
 
 from config.providers.initialize_mongodb import initialize_mongodb
-from config.providers.initialize_mercadopago import initialize_mercadopago
+from config.providers.initialize_mercadopago import initialize_mercadopago, REVOKING_STATUSES
 from config.providers.initialize_redis  import initialize_redis
 from config.providers.initialize_cloudinary  import initialize_cloudinary
 
@@ -117,35 +118,59 @@ class Server:
             "email": email,
             "is_verified": True}) is not None
     
-    def user_is_free(self, username: str) -> bool:
-        current_user = self.get_user(username)
+    def user_is_free(self, uid: str) -> bool:
+        current_user = self.get_user(uid)
 
         if not current_user:
             return True
 
         subscription_end = current_user.get("subscription_end")
+        has_active_subscription = False
 
-        has_active_subscription = (
-            subscription_end is not None
-            and datetime.now(timezone.utc) < subscription_end
-        )
+        if isinstance(subscription_end, datetime):
+            if subscription_end.tzinfo is None:
+                subscription_end = subscription_end.replace(tzinfo=timezone.utc)
+                
+            has_active_subscription = datetime.now(timezone.utc) < subscription_end
 
         if has_active_subscription:
             if current_user.get("is_free", True):
                 self.users_collection.update_one(
-                    {"username": username},
+                    {"uid": uid},
                     {"$set": {"is_free": False}}
                 )
-
             return False
 
         if not current_user.get("is_free", True):
             self.users_collection.update_one(
-                {"username": username},
+                {"uid": uid},
                 {"$set": {"is_free": True}}
             )
 
         return True
+    
+    def current_identity(self) -> str | None:
+        try:
+            verify_jwt_in_request(optional=True)
+
+            return get_jwt_identity()
+
+        except Exception:
+            return None
+
+    def rate_limit_key(self) -> str:
+        for refresh in (False, True):
+            try:
+                verify_jwt_in_request(refresh=refresh, optional=not refresh)
+                identity = get_jwt_identity()
+
+                if identity:
+                    return identity
+
+            except Exception:
+                continue
+
+        return get_remote_address()
         
     def user_or_ip(self) -> str | None:
             try:
@@ -165,25 +190,27 @@ class Server:
                 if endpoint not in (endpoints_require):
                     return get_remote_address()
                 
-                return False
+                return None
 
-    def check_and_apply_block(self, current_user: str, increment: bool = True) -> Response | None:
+    def check_and_apply_block(self, current_user: str | None, increment: bool = True) -> Response | None:
+        if not current_user:
+            return None
+
         block_key = f"blocked:{current_user}"
         count_key = f"count429:{current_user}"
-        
+
         ttl = self.redis_client.ttl(block_key)
         if ttl > 0:
             minutes = max(1, math.ceil(ttl / 60))
             return self.create_error_response(f"You have been temporarily blocked due to repeated rate limit violations. Please try again in {minutes} minute(s).", 403)
-        
+
         count =  None
-        
+
         if increment:
-            pipe = self.redis_client.pipeline()
-            pipe.incr(count_key)
-            pipe.expire(count_key, 300)
-            
-            count, _ = pipe.execute()
+            count = self.redis_client.incr(count_key)
+
+            if count == 1:
+                self.redis_client.expire(count_key, 300)
 
         if increment and count == 3:
             return self.create_error_response("You are approaching the rate limit. One more failed attempt will block you for 30 minutes. Please try again later.", 429)
@@ -196,20 +223,74 @@ class Server:
         
         return None
 
+    def get_dynamic_limit(self) -> str:
+        current_user = self.current_identity()
+
+        if not current_user or self.user_is_free(current_user):
+            return ABUSE_LIMIT
+
+        user_info = self.get_user(current_user) or {}
+        plan = user_info.get("plan")
+
+        return PLAN_LIMITS.get(plan, ABUSE_LIMIT)
+
+    def verify_mercadopago_signature(self, payment_id: str) -> bool:
+        if not self.mercadopago_webhook_secret:
+            self.app.logger.warning(
+                "MERCADOPAGO_WEBHOOK_SECRET is not set: webhook signatures are not being verified."
+            )
+            return True
+
+        signature = request.headers.get("x-signature", "")
+        request_id = request.headers.get("x-request-id", "")
+
+        parts = dict(
+            piece.split("=", 1) for piece in signature.split(",") if "=" in piece
+        )
+
+        ts = parts.get("ts", "").strip()
+        received_signature = parts.get("v1", "").strip()
+
+        if not ts or not received_signature:
+            return False
+
+        data_id = str(payment_id)
+
+        if data_id.isalnum():
+            data_id = data_id.lower()
+
+        manifest = f"id:{data_id};"
+
+        if request_id:
+            manifest += f"request-id:{request_id};"
+
+        manifest += f"ts:{ts};"
+
+        expected_signature = hmac.new(
+            self.mercadopago_webhook_secret.encode("utf-8"),
+            manifest.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+        return hmac.compare_digest(expected_signature, received_signature)
+
     def _register_routes(self) -> None:
         @self.app.errorhandler(429)
         def ratelimit_error(e) -> Response:
-            current_user = self.user_or_ip()
+            breached = getattr(self.limiter, "current_limit", None)
+
+            if request.endpoint == "lectify_summarize" and breached and "month" in str(breached.limit):
+                return self.create_error_response("Monthly lectify summarize quota reached for your plan. Upgrade your plan to continue using this feature.", 429)
+
+            if request.endpoint == "lectify_questions" and breached and "month" in str(breached.limit):
+                return self.create_error_response("Monthly lectify questions quota reached for your plan. Upgrade your plan to continue using this feature.", 429)
+
+            current_user = self.current_identity()
+
             response_check_and_apply_block = self.check_and_apply_block(current_user)
 
             if response_check_and_apply_block:
                 return response_check_and_apply_block
-
-            endpoint = request.endpoint
-
-            if endpoint in ("lectify_summarize", "lectify_questions"):
-                if self.user_is_free(current_user):
-                    return self.create_error_response("Too many requests. Please try again later or upgrade your plan to continue using this feature.", 429)
 
             return self.create_error_response("Too many requests. Please try again later.", 429)
         
@@ -220,10 +301,16 @@ class Server:
                 clean_up(getattr(self, "filepath_secure", None))
             
             return response
+        
+        @self.app.route('/health', methods=['GET'])
+        @self.limiter.limit("50 per minute")
+        def health_check():
+            return jsonify({"status": "healthy"}), 200
 
         @self.app.route('/lectify/summarize', methods=['POST'])
+        @self.limiter.limit(ABUSE_LIMIT, scope="abuse")
+        @self.limiter.limit(self.get_dynamic_limit, deduct_when=lambda response: response.status_code == 201)
         @jwt_required()
-        @self.limiter.limit("5 per minute")
         def lectify_summarize() -> Response:
             try:
                 current_user = self.user_or_ip()
@@ -347,8 +434,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/check_summarize', methods=['POST'])
+        @self.limiter.limit("50 per minute")
         @jwt_required()
-        @self.limiter.limit("20 per minute")
         def lectify_check_summarize() -> Response:
             try:
                 current_user = self.user_or_ip()
@@ -451,8 +538,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/summarize/files', methods=['GET'])
-        @jwt_required()
         @self.limiter.limit("5 per minute")
+        @jwt_required()
         def lectify_summarize_files() -> Response:
             try:
                 current_user = self.user_or_ip()
@@ -500,8 +587,8 @@ class Server:
 
                     
         @self.app.route('/lectify/summarize/files/<string:file_id>', methods=['GET'])
-        @jwt_required()
         @self.limiter.limit("5 per minute")
+        @jwt_required()
         def lectify_summarize_files_by_id(file_id: str) -> Response:
             try:
                 current_user = self.user_or_ip()
@@ -544,8 +631,9 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/questions', methods=['POST'])
+        @self.limiter.limit(ABUSE_LIMIT, scope="abuse")
+        @self.limiter.limit(self.get_dynamic_limit, deduct_when=lambda response: response.status_code == 201)
         @jwt_required()
-        @self.limiter.limit("5 per minute")
         def lectify_questions() -> Response:
             try:
                 current_user = self.user_or_ip()
@@ -970,6 +1058,7 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/profile', methods=['GET'])
+        @self.limiter.limit("50 per minute")
         @jwt_required()
         def lectify_profile() -> Response:
             try:                
@@ -1008,8 +1097,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/refresh_token', methods=['POST'])
-        @jwt_required(refresh=True)
         @self.limiter.limit("5 per minute")
+        @jwt_required(refresh=True)
         def lectify_refresh_token() -> Response:
             try:                
                 current_user = get_jwt_identity()
@@ -1034,8 +1123,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/update_profile', methods=['PATCH'])
-        @jwt_required()
         @self.limiter.limit("10 per minute")
+        @jwt_required()
         def lectify_update_profile() -> Response:
             try:                
                 current_user = self.user_or_ip()
@@ -1127,8 +1216,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/update_image_profile', methods=['PUT'])
-        @jwt_required()
         @self.limiter.limit("10 per minute")
+        @jwt_required()
         def lectify_update_image_profile() -> Response:
             try:                
                 current_user = self.user_or_ip()
@@ -1227,8 +1316,8 @@ class Server:
                 )
 
         @self.app.route('/lectify/ping_email_delete_account', methods=['POST'])
-        @jwt_required()
         @self.limiter.limit("5 per minute")
+        @jwt_required()
         def lectify_ping_email_delete_account() -> Response:
             try:                
                 current_user = self.user_or_ip()
@@ -1290,8 +1379,8 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/pong_email_delete_account', methods=['DELETE'])
-        @jwt_required()
         @self.limiter.limit("5 per minute")
+        @jwt_required()
         def lectify_pong_email_delete_account() -> Response:
             try:                
                 current_user = self.user_or_ip()
@@ -1509,10 +1598,10 @@ class Server:
             except Exception:
                 return self.create_error_response('An error occurred while processing the request', 500)
 
-        @self.app.route('/lectify/checkout', methods=['POST'])
-        @jwt_required()
+        @self.app.route('/misa/checkout', methods=['POST'])
         @self.limiter.limit("10 per minute")
-        def lectify_checkout() -> Response:
+        @jwt_required()
+        def misa_checkout() -> Response:
             try:
                 current_user = self.user_or_ip()
                 
@@ -1528,13 +1617,10 @@ class Server:
                 if not current_info_user:
                     return self.create_error_response("User not found", 404)
                 
-                if not self.user_is_free(current_user):
-                    return self.create_error_response("User already has a paid plan", 400)
-            
                 data = request.get_json()
 
                 if not isinstance(data, dict):
-                    return create_error_response("Request body must be a JSON object", 400)
+                    return self.create_error_response("Request body must be a JSON object", 400)
 
                 if not data:
                     return self.create_error_response('No data provided', 400)
@@ -1542,8 +1628,8 @@ class Server:
                 unknown_fields = set(data.keys()) - ALLOWED_FIELDS
 
                 if unknown_fields:
-                    return create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
-                    
+                    return self.create_error_response(f"Disallowed fields found: {', '.join(unknown_fields)}", 400)
+
                 plan = data.get("plan")
                 success_url = data.get("success_url")
                 failure_url = data.get("failure_url")
@@ -1571,7 +1657,7 @@ class Server:
                 
                 if not success_url or not failure_url or not pending_url:
                     return self.create_error_response("Success, failure and pending URLs are required", 400)
-                
+
                 validation_error = validate_user_data({
                     "success_url": success_url,
                     "failure_url": failure_url,
@@ -1580,7 +1666,7 @@ class Server:
 
                 if validation_error:
                     return self.create_error_response(validation_error, 400)
-                
+
                 selected_plan = self.plans.get(plan)
                 price = selected_plan['price']
                 email = current_info_user['email']
@@ -1605,7 +1691,7 @@ class Server:
                 preference_data = {
                     "items": [
                         {
-                            "title": "Lectify Premium",
+                            "title": "Misa Premium",
                             "quantity": 1,
                             "unit_price": price,
                             "currency_id": "BRL"
@@ -1641,8 +1727,8 @@ class Server:
             except Exception:
                 return self.create_error_response('An error occurred while processing the request.', 500)
 
-        @self.app.route('/lectify/webhook', methods=['POST'])
-        def lectify_webhook() -> Response:
+        @self.app.route('/misa/webhook', methods=['POST'])
+        def misa_webhook() -> Response:
             try:
                 data = request.get_json(silent=True) or {}
 
@@ -1653,6 +1739,9 @@ class Server:
 
                 if not payment_id:
                     return self.create_error_response("Payment ID not found", 400)
+
+                if not self.verify_mercadopago_signature(payment_id):
+                    return self.create_error_response("Invalid webhook signature", 401)
 
                 payment_response = self.mercadopago_sdk.payment().get(payment_id)
 
@@ -1682,38 +1771,60 @@ class Server:
                 if not transaction:
                     return self.create_error_response("Transaction not found", 404)
 
-                if status == "refunded":
+                if transaction.get("uid") != uid or transaction.get("plan") != plan:
+                    return self.create_error_response("Transaction does not match the payment", 400)
+
+                if status in REVOKING_STATUSES:
+                    if transaction.get("status") in REVOKING_STATUSES:
+                        return jsonify({"message": "Reversal already processed", "status": transaction.get("status")}), 200
+
                     self.transactions_collection.update_one(
                         {"transaction_id": transaction_id},
                         {
                             "$set": {
-                                "status": "refunded",
+                                "status": status,
                                 "refunded_at": datetime.now(timezone.utc),
                                 "mercadopago_payment_id": str(payment_id)
                             }
                         }
                     )
 
-                    self.users_collection.update_one(
-                        {
-                            "uid": uid,
-                            "mercadopago_payment_id": str(payment_id)
-                        },
-                        {
-                            "$set": {
-                                "is_free": True,
-                                "plan": None,
-                                "subscription_end": None
-                            },
-                            "$unset": {
-                                "mercadopago_payment_id": "",
-                            }
+                    refunded_user = self.get_user(uid)
+
+                    if not refunded_user:
+                        return self.create_error_response("User not found", 404)
+
+                    now = datetime.now(timezone.utc)
+                    subscription_end = refunded_user.get("subscription_end")
+
+                    if isinstance(subscription_end, datetime):
+                        if subscription_end.tzinfo is None:
+                            subscription_end = subscription_end.replace(tzinfo=timezone.utc)
+                    else:
+                        subscription_end = None
+
+                    if subscription_end:
+                        subscription_end -= timedelta(days=self.plans[plan]["days"])
+
+                    still_active = bool(subscription_end and subscription_end > now)
+
+                    update_user = {
+                        "$set": {
+                            "is_free": not still_active,
+                            "plan": refunded_user.get("plan") if still_active else None,
+                            "subscription_end": subscription_end if still_active else None
                         }
-                    )
+                    }
+
+                    if refunded_user.get("mercadopago_payment_id") == str(payment_id):
+                        update_user["$unset"] = {"mercadopago_payment_id": ""}
+
+                    self.users_collection.update_one({"uid": uid}, update_user)
 
                     return jsonify({
-                        "message": "Payment refunded and plan revoked",
-                        "status": "refunded"
+                        "message": "Payment reversed and period revoked" if still_active else "Payment reversed and plan revoked",
+                        "status": status,
+                        "subscription_end": subscription_end.isoformat() if still_active else None
                     }), 200
 
                 if status != "approved":
@@ -1738,6 +1849,26 @@ class Server:
 
                 selected_plan = self.plans[plan]
 
+                now = datetime.now(timezone.utc)
+                current_subscription_end = current_info_user.get("subscription_end")
+
+                if isinstance(current_subscription_end, datetime):
+                    if current_subscription_end.tzinfo is None:
+                        current_subscription_end = current_subscription_end.replace(tzinfo=timezone.utc)
+                else:
+                    current_subscription_end = None
+
+                subscription_is_active = bool(current_subscription_end and current_subscription_end > now)
+
+                subscription_start = current_subscription_end if subscription_is_active else now
+                subscription_end = subscription_start + timedelta(days=selected_plan["days"])
+
+                current_plan = current_info_user.get("plan") if subscription_is_active else None
+                effective_plan = plan
+
+                if current_plan and STORAGE_LIMITS.get(current_plan, 0) > STORAGE_LIMITS.get(plan, 0):
+                    effective_plan = current_plan
+
                 self.transactions_collection.update_one(
                     {"transaction_id": transaction_id},
                     {
@@ -1757,18 +1888,20 @@ class Server:
                     {
                         "$set": {
                             "is_free": False,
-                            "plan": plan,
-                            "subscription_end": datetime.now(timezone.utc) + timedelta(days=selected_plan["days"]),
+                            "plan": effective_plan,
+                            "subscription_end": subscription_end,
                             "mercadopago_payment_id": str(payment_id),
                         }
                     }
                 )
         
                 return jsonify({
-                    "message": "Payment approved and plan activated",
+                    "message": "Payment approved and plan renewed" if subscription_is_active else "Payment approved and plan activated",
                     "status": "approved",
-                    "plan": plan
+                    "plan": effective_plan,
+                    "subscription_end": subscription_end.isoformat()
                 }), 200
+
             except Exception:
                 return self.create_error_response('An error occurred while processing the request.', 500)
                 

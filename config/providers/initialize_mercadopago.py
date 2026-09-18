@@ -5,6 +5,8 @@ import os
 
 load_dotenv()
 
+REVOKING_STATUSES = frozenset({"refunded", "charged_back", "cancelled"})
+
 def initialize_mercadopago() -> dict:
     sdk = mercadopago.SDK(os.getenv("MERCADOPAGO_SECRET_KEY"))
 
