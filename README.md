@@ -41,7 +41,8 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
 
 - YouTube video transcription + AI summarization (supports pt-BR and en-US)
 - RabbitMQ-based asynchronous summarize processing
-- Automatic quiz generation from PDF/Markdown files
+- Automatic quiz generation from PDF/Markdown files or from a stored summary, cached per user
+- 7-day retention for summaries and generated questions
 - JWT-based authentication & refresh tokens
 - Email verification, password reset & account deletion flows
 - Profile management (including image upload via Cloudinary)
@@ -101,7 +102,7 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
 
 ## Prerequisites
 
-To run the Lectify Flask API, use Ubuntu 20.04, 22.04, or 24.04 (or a similar Debian-based system) with Python 3.10 or higher. The environment must include Docker and Docker Compose for containerized services, Redis for caching and rate limiting, RabbitMQ for asynchronous queue processing, FFmpeg for media processing, and internet access for external services such as AI APIs, email SMTP, Mercado Pago, Cloudinary, and Google Cloud services. Ensure all dependencies are properly installed before running the application.
+To run the Lectify Flask API, use Ubuntu 20.04, 22.04, or 24.04 (or a similar Debian-based system) with Python 3.10 or higher. The environment must include Docker and Docker Compose for containerized services, Redis Cloud for caching and rate limiting, MongoDB Atlas, RabbitMQ for asynchronous queue processing, FFmpeg for media processing, and internet access for external services such as AI APIs, email SMTP, Mercado Pago, Cloudinary, and Google Cloud services. Ensure all dependencies are properly installed before running the application.
 
 ### Manual Installation (Ubuntu/Debian)
 
@@ -182,7 +183,10 @@ The `make run` command automatically sets up the virtual environment, installs d
 | `POST`   | `/lectify/check_summarize`           | Checks the status of a summarization request.               |
 | `GET`    | `/lectify/summarize/files`           | List all summarized files of the current user.              |
 | `GET`    | `/lectify/summarize/files/<file_id>` | Download a specific summarized file by ID.                  |
-| `POST`   | `/lectify/questions`                 | Generates questions from an MD or PDF file.                 |
+| `DELETE` | `/lectify/summarize/files/<file_id>` | Delete a summarized file and the questions generated from it. |
+| `POST`   | `/lectify/questions`                 | Generates questions from an uploaded MD or PDF file, or from a stored summary via `file_id`. Cached results are returned without consuming quota. |
+| `GET`    | `/lectify/questions`                 | List the quizzes of the current user, newest first, without the question payload. |
+| `GET`    | `/lectify/questions/<question_id>`   | Return a single quiz with all its questions.                |
 | `POST`   | `/lectify/check_email_register`      | Sends verification code via email for registration.         |
 | `POST`   | `/lectify/verify_email_register`     | Verifies email code for registration.                       |
 | `POST`   | `/lectify/register`                  | Registers a new user.                                       |
@@ -199,6 +203,21 @@ The `make run` command automatically sets up the virtual environment, installs d
 | `POST`   | `/lectify/checkout`                  | Creates checkout session for paid plan.              |
 | `POST`   | `/lectify/webhook`                   | Mercado Pago webhook to process payments (internal).        |
 
+
+### Data Retention
+
+Summaries are kept for **7 days** from the moment they are generated, regardless of plan.
+Questions inherit the expiry of the summary they were generated from, and questions
+generated from an uploaded file get their own 7-day window. Users are expected to download
+what they want to keep.
+
+Expired data is removed by a purge that runs inside the summarize worker, at startup and
+every 6 hours after that. Deletion is not handled by a MongoDB TTL index, because removing
+a GridFS entry that way would leave its binary chunks orphaned. This means the purge only
+runs while the worker is running.
+
+Deleting a summary, either through `DELETE /lectify/summarize/files/<file_id>` or by
+deleting the account, also removes the questions generated from it.
 
 ### Core Endpoints
 
@@ -224,6 +243,18 @@ The `make run` command automatically sets up the virtual environment, installs d
     - Type: `String`
     - **Supported Languages**: `pt-BR`, `en-US`
     - **Example**: `pt-BR`
+
+##### Responses Summarize:
+
+- `201` — the request was queued. This is the only response that spends plan quota.
+- `200` — the user already had this summary. Returns the file itself, spends no quota.
+- `409` — this exact request is already being processed.
+- `429` — quota or rate limit reached. Four of these within five minutes trigger a 30 minute block.
+
+The API prepends `https://` to a URL that does not have it and stores the normalized value, so
+normalize it on the client as well before looking the file up in `/lectify/summarize/files`. The
+same video can be summarized in more than one format and language, so filter by `youtube_url`,
+`filetype` and `language` before picking the newest entry.
 
 ###### Example Request Summarize
 
@@ -270,8 +301,63 @@ curl -X POST "http://127.0.0.1:5000/lectify/check_summarize" \
 
 #### Frontend Integration Summarize
 
-```ts
+A summarize request either returns the file straight away, when the user already has it, or
+queues the job so it can be polled until it completes.
 
+```ts
+const API = `${process.env.NEXT_PUBLIC_BASE_URL}/lectify`;
+const headers = { Authorization: `Bearer ${accessToken}` };
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const normalizeUrl = (url: string) => (url.startsWith('https://') ? url : `https://${url}`);
+
+export async function summarize(
+  youtube_url: string,
+  output_format: 'pdf' | 'md',
+  language_select: 'pt-BR' | 'en-US' = 'pt-BR',
+) {
+  const body = { youtube_url: normalizeUrl(youtube_url), output_format, language_select };
+
+  try {
+    const res = await axios.post<Blob>(`${API}/summarize`, body, { headers, responseType: 'blob' });
+
+    if (res.status === 200 && ['application/pdf', 'text/markdown'].includes(res.data.type)) {
+      return { blob: res.data, consumedQuota: false };
+    }
+  } catch (error) {
+    if (error.response?.status !== 409) throw error;
+  }
+
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await delay(10_000);
+
+    const { data } = await axios.post(`${API}/check_summarize`, body, { headers });
+
+    if (data.status === 'error') throw new Error('The summary could not be generated for this video.');
+    if (data.status !== 'success') continue;
+
+    const { data: files } = await axios.get(`${API}/summarize/files`, { headers });
+
+    const file = files
+      .filter(
+        (f) =>
+          f.youtube_url === body.youtube_url &&
+          f.filetype === output_format &&
+          f.language === language_select,
+      )
+      .sort((a, b) => +new Date(b.summary_at) - +new Date(a.summary_at))[0];
+
+    const { data: blob } = await axios.get<Blob>(`${API}/summarize/files/${file.id}`, {
+      headers,
+      responseType: 'blob',
+    });
+
+    return { blob, file, consumedQuota: true };
+  }
+
+  throw new Error('The summary is taking longer than expected.');
+}
 ```
 
 ## Acknowledgments
