@@ -6,7 +6,6 @@ from src.modules.vertex_ai import Vertex
 from src.modules.transcript_fetcher import TranscriptFetcher
 
 from config.providers.initialize_mongodb import initialize_mongodb
-from config.providers.initialize_mercadopago import PLANS
 from config.prompt_config import prompt_summarize
 from config.input_config import MAX_SOURCE_TEXT_CHARS
 from src.utils.system_utils import clean_up, sanitize_filename, create_google_credentials
@@ -56,27 +55,21 @@ class Worker:
         mongo = initialize_mongodb()
         self.grid_fs = mongo["grid_fs"]
         self.check_summarize_collection = mongo["check_summarize_collection"]
-        self.users_collection = mongo["users_collection"]
         self.documents_collection = mongo["documents_collection"]
 
         self.retention = Retention(
             mongo["grid_fs"],
             mongo["documents_collection"],
             mongo["chunks_collection"],
-            PLANS
+            mongo["questions_collection"]
         )
-
-    def user_plan(self, username: str) -> str | None:
-        user = self.users_collection.find_one({"username": username}, {"plan": 1})
-
-        return (user or {}).get("plan")
 
     def start_retention_purge(self) -> None:
         def loop() -> None:
             while True:
                 try:
                     result = self.retention.run()
-                    print(f'message: Retention purge removed {result["expired_files"]} files and {result["orphan_chunks"]} orphan chunks')
+                    print(f'message: Retention purge removed {result["expired_files"]} files, {result["expired_questions"]} questions and {result["orphan_chunks"]} orphan chunks')
 
                 except Exception:
                     traceback.print_exc()
@@ -171,7 +164,9 @@ class Worker:
                 relative_path_markdown = relative_path_audio.replace(".mp3", ".md")
                 relative_path_pdf = relative_path_audio.replace(".mp3", ".pdf")
 
-                response_audio_recognition = AudioRecognition().recognize_audio(relative_path_audio, language_select)
+                response_audio_recognition = call_with_retry(
+                    lambda: AudioRecognition().recognize_audio(relative_path_audio, language_select)
+                )
                 source_text = (response_audio_recognition['data'] or '').strip()
 
             if not source_text:
@@ -183,7 +178,7 @@ class Worker:
 
             response_generative_ai = call_with_retry(lambda: Vertex().start_chat(merged_prompt))
 
-            expires_at = self.retention.expires_at(self.user_plan(username))
+            expires_at = self.retention.expires_at()
 
             DocumentBuilder().build_document(response_generative_ai['data'], relative_path_markdown)
 
