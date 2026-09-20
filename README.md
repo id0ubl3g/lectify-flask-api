@@ -46,53 +46,57 @@ The Lectify Flask API is a web application developed with Flask, designed to sum
 - Email verification, password reset & account deletion flows
 - Profile management (including image upload via Cloudinary)
 - Mercado Pago subscription integration (monthly, 6 months, yearly plans)
-- Rate limiting & Redis caching
+- MongoDB Atlas-based data persistence
+- Redis Cloud caching and rate limiting
 
 ## Project Structure
 
 ```plaintext
 └── lectify-flask-api/
-  ├── .github
-  │ ├── robot-logo.png
-  ├── config/
-  │     └── providers/
-  │       ├── initialize_cloudinary.py
-  │       ├── initialize_mercadopago.py
-  │       ├── initialize_mongodb.py
-  │       ├── initialize_redis.py
-  │   ├── file_config.py
-  │   ├── input_config.py
-  │   ├── path_config.py
-  │   ├── prompt_config.py
-  ├── src/
-  │   ├── api/
-  │   │   └── app.py
-  │   ├── modules/
-  │   │   ├── audio_downloader.py
-  │   │   ├── audio_recognition.py
-  │   │   ├── convert_document.py
-  │   │   ├── document_builder.py
-  │   │   ├── extract_text.py
-  │   │   └── generative_ai.py
-  │   ├── rabbitmq/
-  │   │   ├── connection.py
-  │   │   └── publisher.py
-  │   ├── utils/
-  │   │   ├── return_responses.py
-  │   │   ├── send_email_verification.py
-  │   │   └── system_utils.py
-  │   └── workers/
-  │       └── summarize_worker.py
-  ├── .dockerignore
-  ├── .env.example
-  ├── .gitignore
-  ├── docker-compose.yml
-  ├── install.sh
-  ├── LICENSE
-  ├── makefile
-  ├── README.md
-  ├── requirements.txt
-  └── run.py
+    ├── .github/
+    │   └── book-logo.png
+    ├── config/
+    │   ├── providers/
+    │   │   ├── initialize_cloudinary.py
+    │   │   ├── initialize_mercadopago.py
+    │   │   ├── initialize_mongodb.py
+    │   │   └── initialize_redis.py
+    │   ├── file_config.py
+    │   ├── input_config.py
+    │   ├── limits_config.py
+    │   ├── path_config.py
+    │   └── prompt_config.py
+    ├── src/
+    │   ├── api/
+    │   │   └── app.py
+    │   ├── modules/
+    │   │   ├── audio_downloader.py
+    │   │   ├── audio_recognition.py
+    │   │   ├── convert_document.py
+    │   │   ├── document_builder.py
+    │   │   ├── extract_text.py
+    │   │   ├── retention.py
+    │   │   ├── transcript_fetcher.py
+    │   │   └── vertex_ai.py
+    │   ├── rabbitmq/
+    │   │   ├── connection.py
+    │   │   └── publisher.py
+    │   ├── utils/
+    │   │   ├── return_responses.py
+    │   │   ├── send_email_verification.py
+    │   │   └── system_utils.py
+    │   └── workers/
+    │       └── summarize_worker.py
+    ├── .dockerignore
+    ├── .env.example
+    ├── .gitignore
+    ├── docker-compose.yml
+    ├── install.sh
+    ├── LICENSE
+    ├── makefile
+    ├── README.md
+    ├── requirements.txt
+    └── run.py
 ```
 
 ## Prerequisites
@@ -133,23 +137,27 @@ Configure the required environment variables in `.env`, including:
 - Email SMTP settings
 - Mercado Pago keys
 - MongoDB connection
+- Redis Cloud configuration
 - Cloudinary (for profile images)
 Base URLs, etc.
 
 Sensitive credentials should not be committed to the repository.
 
-To enable the Speech-to-Text feature, it is required to configure the Google Cloud service account JSON file.
+Vertex AI (summaries and quiz generation) and Speech-to-Text both authenticate with a Google Cloud service account.
 
-Place the file inside the config/ directory:
-
-```plaintext
-config/google_credentials.json
-```
-
-Then set the environment variable pointing to this file:
+Set the path where the credentials file lives. This is the only variable that points to it, and both the API and the worker read it:
 
 ```sh
-path_google_application_credentials_json=config/google_credentials.json
+GOOGLE_APPLICATION_CREDENTIALS=config/google_credentials.json
+```
+
+The file is written at startup from the `GOOGLE_*` variables in `.env`, so you do not need to place it there yourself. If those variables are absent, an existing file at that path is reused instead.
+
+Vertex AI also requires the project and region:
+
+```sh
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
 ```
 
 ## Running the Application
@@ -169,6 +177,7 @@ The `make run` command automatically sets up the virtual environment, installs d
 
 | Method   | Endpoint                             | Description                                                 |
 | -------- | ------------------------------------ | ----------------------------------------------------------- |
+| `GET`    | `/health`                            | Liveness probe. Returns service status. No authentication.  |
 | `POST`   | `/lectify/summarize`                 | Generates a summary of a YouTube video in MD or PDF format. |
 | `POST`   | `/lectify/check_summarize`           | Checks the status of a summarization request.               |
 | `GET`    | `/lectify/summarize/files`           | List all summarized files of the current user.              |
@@ -179,6 +188,7 @@ The `make run` command automatically sets up the virtual environment, installs d
 | `POST`   | `/lectify/register`                  | Registers a new user.                                       |
 | `POST`   | `/lectify/login`                     | Logs in and returns JWT tokens.                             |
 | `GET`    | `/lectify/profile`                   | Returns user profile data.                                  |
+| `GET`    | `/lectify/usage`                     | Returns the current plan and its remaining quota per feature. |
 | `POST`   | `/lectify/refresh_token`             | Refreshes access token using refresh token.                 |
 | `PATCH`  | `/lectify/update_profile`            | Updates user profile (name or password).                    |
 | `PUT`    | `/lectify/update_image_profile`      | Updates or removes user profile image.                      |
@@ -187,7 +197,7 @@ The `make run` command automatically sets up the virtual environment, installs d
 | `POST`   | `/lectify/ping_email_reset_password` | Sends password reset link via email.                        |
 | `POST`   | `/lectify/pong_email_reset_password` | Verifies token and updates password.                        |
 | `POST`   | `/lectify/checkout`                  | Creates checkout session for paid plan.              |
-| `POST`   | `/lectify/webhook`                   | Stripe webhook to process payments (internal).              |
+| `POST`   | `/lectify/webhook`                   | Mercado Pago webhook to process payments (internal).        |
 
 
 ### Core Endpoints
