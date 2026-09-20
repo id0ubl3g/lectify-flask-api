@@ -89,7 +89,14 @@ def sanitize_filename(name: str, max_length: int = 120) -> str:
 
     return name[:max_length]
 
+def google_credentials_path() -> Path:
+    return Path(
+        os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "config/google-credentials.json"
+    )
+
 def create_google_credentials() -> str:
+    path = google_credentials_path()
+
     try:
         credentials = {
             "type": os.environ["GOOGLE_TYPE"],
@@ -106,13 +113,16 @@ def create_google_credentials() -> str:
         }
 
     except Exception:
-        print('Error occurred while creating Google credentials')
+        if path.exists():
+            print(f'Google credentials env vars missing, reusing {path}')
+            return str(path)
+
+        print('Error occurred while creating Google credentials and no credentials file found')
         sys.exit(1)
 
-
-    path = Path("config/lofty-entropy-465701-u3-279b20bee809.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     with path.open("w") as file:
         json.dump(credentials, file, indent=2)
 
-    return path
+    return str(path)

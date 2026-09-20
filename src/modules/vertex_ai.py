@@ -1,15 +1,25 @@
 from src.utils.return_responses import create_success_return_response
+from src.utils.system_utils import google_credentials_path
 
+from google.oauth2 import service_account
 from google import genai
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
-class GenerativeAI:
+class Vertex:
     def __init__(self) -> None:
-        self.api_key = os.getenv("API_KEY_GENERATIVEAI")
-        self.client = genai.Client(api_key=self.api_key)
+        credentials = service_account.Credentials.from_service_account_file(
+            google_credentials_path(),
+            scopes=["https://www.googleapis.com/auth/cloud-platform"])
+
+        self.client = genai.Client(
+            vertexai=True,
+            project=os.getenv("GOOGLE_CLOUD_PROJECT"),
+            location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),
+            credentials=credentials
+        )
 
         self.generation_config = {
             "temperature": 0,

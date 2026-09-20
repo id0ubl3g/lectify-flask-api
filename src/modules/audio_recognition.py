@@ -1,7 +1,9 @@
 from src.utils.return_responses import create_success_return_response
+from src.utils.system_utils import google_credentials_path
 
 from google.oauth2 import service_account
 from pydub.utils import mediainfo
+from config.input_config import MAX_SOURCE_TEXT_CHARS
 from google.cloud import speech
 from dotenv import load_dotenv
 import os
@@ -10,7 +12,7 @@ load_dotenv()
 
 class AudioRecognition:
     def __init__(self):
-        credentials = service_account.Credentials.from_service_account_file(os.getenv('path_google_application_credentials_json'))
+        credentials = service_account.Credentials.from_service_account_file(google_credentials_path())
         self.client = speech.SpeechClient(credentials=credentials)
 
     def recognize_audio(self, audio_path: str, language_select: str) -> dict:
@@ -28,6 +30,6 @@ class AudioRecognition:
             audio = speech.RecognitionAudio(content=content)
 
         response_audio_recognized = self.client.recognize(audio=audio, config=config)
-        audio_recognized = " ".join([result.alternatives[0].transcript for result in response_audio_recognized.results])[:500]
+        audio_recognized = " ".join([result.alternatives[0].transcript for result in response_audio_recognized.results])[:MAX_SOURCE_TEXT_CHARS]
         
         return create_success_return_response(f'Audio successfully recognized', audio_recognized)
