@@ -12,7 +12,13 @@ def initialize_mongodb():
 
     grid_fs = gridfs.GridFS(db, collection="documents")
     documents_collection = db["documents.files"]
-    documents_collection.create_index("summary_at", expireAfterSeconds=1296000)
+    chunks_collection = db["documents.chunks"]
+
+    if "summary_at_1" in documents_collection.index_information():
+        documents_collection.drop_index("summary_at_1")
+
+    documents_collection.create_index("expires_at")
+    documents_collection.create_index("username")
 
     check_email_collection = db["check_email"]
     check_email_collection.create_index("email", unique=True)
@@ -34,6 +40,7 @@ def initialize_mongodb():
         "db": db,
         "grid_fs": grid_fs,
         "documents_collection": documents_collection,
+        "chunks_collection": chunks_collection,
         "check_email_collection": check_email_collection,
         "users_collection": users_collection,
         "check_summarize_collection": check_summarize_collection,
