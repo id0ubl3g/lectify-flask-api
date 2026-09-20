@@ -1,7 +1,7 @@
 import json
 
 prompt_summarize = """
-Crie um material didático curto em Markdown com base no trecho.
+Crie um material didático curto em Markdown com base na transcrição.
 
 Estrutura:
 # Título
@@ -21,7 +21,7 @@ Regras:
 - Evite explicações longas
 - Use Markdown
 
-Trecho:
+Transcrição:
 """
 
 data_questions = {
@@ -36,7 +36,7 @@ data_questions = {
 }
 
 prompt_questions = f"""
-Gere 5 questão de múltipla escolha com base no trecho.
+Gere 5 questão de múltipla escolha com base na transcrição.
 Retorne somente JSON válido.
 
 Formato exato (não altere chaves):
@@ -52,5 +52,5 @@ Regras:
 - Máx 150 caracteres por campo
 - Sem texto fora do JSON
 
-Trecho:
+Transcrição:
 """

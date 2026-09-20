@@ -33,3 +33,10 @@ ALLOWED_FIELDS = {
     "username",
     "youtube_url"
 }
+
+MAX_SOURCE_TEXT_CHARS = 200000
+
+CAPTION_LANGUAGE_FALLBACKS = {
+    'pt-BR': ['pt-BR', 'pt', 'pt-orig', 'pt-PT'],
+    'en-US': ['en-US', 'en', 'en-orig', 'en-GB'],
+}
