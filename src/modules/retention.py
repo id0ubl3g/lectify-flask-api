@@ -1,19 +1,21 @@
 from datetime import datetime, timedelta, timezone
 
-DEFAULT_RETENTION_DAYS = 30
+RETENTION_DAYS = 7
 
 class Retention:
-    def __init__(self, grid_fs, documents_collection, chunks_collection, plans: dict) -> None:
+    def __init__(self, grid_fs, documents_collection, chunks_collection, questions_collection) -> None:
         self.grid_fs = grid_fs
         self.documents_collection = documents_collection
         self.chunks_collection = chunks_collection
-        self.plans = plans
+        self.questions_collection = questions_collection
 
-    def retention_days(self, plan: str | None) -> int:
-        return self.plans.get(plan, {}).get("days", DEFAULT_RETENTION_DAYS)
+    def expires_at(self) -> datetime:
+        return datetime.now(timezone.utc) + timedelta(days=RETENTION_DAYS)
 
-    def expires_at(self, plan: str | None) -> datetime:
-        return datetime.now(timezone.utc) + timedelta(days=self.retention_days(plan))
+    def delete_document(self, file_id) -> int:
+        self.grid_fs.delete(file_id)
+
+        return self.questions_collection.delete_many({"file_id": file_id}).deleted_count
 
     def purge_expired(self) -> int:
         expired = self.documents_collection.find(
@@ -24,10 +26,15 @@ class Retention:
         removed = 0
 
         for document in expired:
-            self.grid_fs.delete(document["_id"])
+            self.delete_document(document["_id"])
             removed += 1
 
         return removed
+
+    def purge_expired_questions(self) -> int:
+        return self.questions_collection.delete_many(
+            {"expires_at": {"$lte": datetime.now(timezone.utc)}}
+        ).deleted_count
 
     def purge_orphan_chunks(self, batch_size: int = 1000) -> int:
         pipeline = [
@@ -62,5 +69,6 @@ class Retention:
     def run(self) -> dict:
         return {
             "expired_files": self.purge_expired(),
+            "expired_questions": self.purge_expired_questions(),
             "orphan_chunks": self.purge_orphan_chunks()
         }
