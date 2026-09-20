@@ -1,10 +1,13 @@
 from src.utils.return_responses import create_success_return_response
 
+from yt_dlp.utils import download_range_func
 import yt_dlp
 import random
 import uuid
 import time
 import os
+
+AUDIO_CLIP_SECONDS = 120
 
 class AudioDownloader:
     def __init__(self) -> None:
@@ -37,11 +40,12 @@ class AudioDownloader:
         ydl_opts['concurrent_fragment_downloads'] = 6
         ydl_opts['retries'] = 4
 
+        ydl_opts['download_ranges'] = download_range_func(None, [(0, AUDIO_CLIP_SECONDS)])
+
         ydl_opts['postprocessor_args'] = [
             '-ar', '16000',
             '-ac', '1',
-            '-ss', '00:00:00',
-            '-t', '00:01:30'
+            '-t', str(AUDIO_CLIP_SECONDS)
             ]
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
