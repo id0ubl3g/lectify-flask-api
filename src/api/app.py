@@ -1,4 +1,4 @@
-from src.modules.generative_ai import GenerativeAI
+from src.modules.vertex_ai import Vertex
 from src.modules.extract_text import ExtractText
 
 from src.rabbitmq.publisher import publish_message
@@ -6,6 +6,7 @@ from src.rabbitmq.publisher import publish_message
 from config.prompt_config import prompt_questions
 from config.file_config import *
 from config.limits_config import *
+from limits import parse_many
 from config.input_config import *
 
 from config.providers.initialize_mongodb import initialize_mongodb
@@ -16,7 +17,7 @@ from config.providers.initialize_cloudinary  import initialize_cloudinary
 from src.utils.send_email_verification import SendEmailVerification
 from src.utils.system_utils import clean_up, is_valid_email, validate_user_data, sanitize_filename
 
-from flask import Flask, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, send_file, Response, g
 from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token, jwt_required, get_jwt_identity, verify_jwt_in_request
 from flask_limiter.util import get_remote_address
 from flask_cors import CORS
@@ -26,15 +27,19 @@ from werkzeug.utils import secure_filename
 from pymongo.collection import Collection
 from datetime import datetime, timezone,timedelta
 from dotenv import load_dotenv
+from decimal import Decimal
 import cloudinary.uploader
 from bson import ObjectId
 import requests
+import hashlib
 import secrets
 import string
 import random
 import magic
 import json
 import math
+import uuid
+import hmac
 import os
 import re
 
@@ -47,7 +52,6 @@ class Server:
         self.app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY')
         self.app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
         self.app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
-        self.app.config['RATELIMIT_STORAGE_URI'] = os.getenv("REDIS_URL")
         self.app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
 
         self.jwt: JWTManager = JWTManager(self.app)
@@ -62,6 +66,7 @@ class Server:
         self.check_email_collection: Collection = mongo["check_email_collection"]
         self.users_collection: Collection = mongo["users_collection"]
         self.check_summarize_collection: Collection = mongo["check_summarize_collection"]
+        self.transactions_collection: Collection = mongo["transactions_collection"]
         
         self.mercadopago_sdk = mercadopago["mercadopago"]
         self.mercadopago_webhook_secret = mercadopago["webhook_secret"]
@@ -91,7 +96,6 @@ class Server:
         self.expected_image_mime_types: dict = EXPECTED_IMAGE_MIME_TYPES
 
         self.output_path: str = OUTPUT_PATH
-        self.filepath_secure: str = None
 
         self.youtube_regex = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/)?[a-zA-Z0-9_-]{11}')
         self.max_url_length: int = 200
@@ -106,6 +110,17 @@ class Server:
     
     def get_email(self, email) -> dict | None:
         return self.users_collection.find_one({"email": email})
+
+    def delete_user_documents(self, username: str) -> int:
+        documents = self.documents_collection.find({"username": username}, {"_id": 1})
+
+        removed = 0
+
+        for document in documents:
+            self.grid_fs.delete(document["_id"])
+            removed += 1
+
+        return removed
     
     def generate_code(self) -> str:
         return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6)).strip()
@@ -136,14 +151,14 @@ class Server:
         if has_active_subscription:
             if current_user.get("is_free", True):
                 self.users_collection.update_one(
-                    {"uid": uid},
+                    {"username": uid},
                     {"$set": {"is_free": False}}
                 )
             return False
 
         if not current_user.get("is_free", True):
             self.users_collection.update_one(
-                {"uid": uid},
+                {"username": uid},
                 {"$set": {"is_free": True}}
             )
 
@@ -234,6 +249,88 @@ class Server:
 
         return PLAN_LIMITS.get(plan, ABUSE_LIMIT)
 
+    QUOTA_FEATURES = {
+        "summarize": "lectify_summarize",
+        "questions": "lectify_questions"
+    }
+
+    def describe_period(self, item) -> tuple[str, int]:
+        """Nome amigavel do periodo de um limite e sua duracao em segundos."""
+        granularity = getattr(getattr(item, "GRANULARITY", None), "name", "")
+        multiples = getattr(item, "multiples", 1) or 1
+
+        if granularity == "day" and multiples % 7 == 0:
+            return "week", item.get_expiry()
+
+        if granularity == "month":
+            return "month", item.get_expiry()
+
+        return granularity or "period", item.get_expiry()
+
+    def usage_for(self, uid: str, endpoint: str, limit_string: str) -> list[dict]:
+        entries = []
+
+        for item in parse_many(limit_string):
+            stats = self.limiter.limiter.get_window_stats(item, uid, endpoint)
+            period, seconds = self.describe_period(item)
+
+            entries.append({
+                "period": period,
+                "period_seconds": seconds,
+                "limit": item.amount,
+                "remaining": stats.remaining,
+                "used": max(item.amount - stats.remaining, 0),
+                "reset_at": datetime.fromtimestamp(stats.reset_time, timezone.utc).isoformat()
+            })
+
+        return entries
+
+    def breached_quota_period(self, breached) -> str | None:
+        limit = getattr(breached, "limit", None)
+
+        if limit is None:
+            return None
+
+        granularity = getattr(getattr(limit, "GRANULARITY", None), "name", "")
+        multiples = getattr(limit, "multiples", 1) or 1
+
+        if granularity == "month":
+            return "Monthly"
+
+        if granularity == "day" and multiples % 7 == 0:
+            return "Weekly"
+
+        return None
+
+    def rebuild_subscription(self, uid: str) -> tuple[str | None, datetime | None]:
+        transactions = self.transactions_collection.find(
+            {"uid": uid, "status": "approved"}
+        ).sort("approved_at", 1)
+
+        plan = None
+        subscription_end = None
+
+        for transaction in transactions:
+            transaction_plan = transaction.get("plan")
+            approved_at = transaction.get("approved_at")
+
+            if transaction_plan not in self.plans or not isinstance(approved_at, datetime):
+                continue
+
+            if approved_at.tzinfo is None:
+                approved_at = approved_at.replace(tzinfo=timezone.utc)
+
+            subscription_is_active = bool(subscription_end and subscription_end > approved_at)
+            subscription_start = subscription_end if subscription_is_active else approved_at
+            subscription_end = subscription_start + timedelta(days=self.plans[transaction_plan]["days"])
+
+            current_plan = plan if subscription_is_active else None
+
+            if not (current_plan and PLAN_RANKS.get(current_plan, 0) > PLAN_RANKS.get(transaction_plan, 0)):
+                plan = transaction_plan
+
+        return plan, subscription_end
+
     def verify_mercadopago_signature(self, payment_id: str) -> bool:
         if not self.mercadopago_webhook_secret:
             self.app.logger.warning(
@@ -279,11 +376,16 @@ class Server:
         def ratelimit_error(e) -> Response:
             breached = getattr(self.limiter, "current_limit", None)
 
-            if request.endpoint == "lectify_summarize" and breached and "month" in str(breached.limit):
-                return self.create_error_response("Monthly lectify summarize quota reached for your plan. Upgrade your plan to continue using this feature.", 429)
+            quota_features = {
+                "lectify_summarize": "lectify summarize",
+                "lectify_questions": "lectify questions"
+            }
 
-            if request.endpoint == "lectify_questions" and breached and "month" in str(breached.limit):
-                return self.create_error_response("Monthly lectify questions quota reached for your plan. Upgrade your plan to continue using this feature.", 429)
+            feature = quota_features.get(request.endpoint)
+            period = self.breached_quota_period(breached)
+
+            if feature and period:
+                return self.create_error_response(f"{period} {feature} quota reached for your plan. Upgrade your plan to continue using this feature.", 429)
 
             current_user = self.current_identity()
 
@@ -297,8 +399,8 @@ class Server:
         @self.app.after_request
         def after_request(response) -> Response:
             endpoint = request.endpoint
-            if endpoint == 'lectify_questions':
-                clean_up(getattr(self, "filepath_secure", None))
+            if endpoint in ('lectify_questions', 'lectify_update_image_profile'):
+                clean_up(g.get("filepath_secure"))
             
             return response
         
@@ -320,7 +422,7 @@ class Server:
                     return response_check_and_apply_block
 
                 if self.user_is_free(current_user):
-                    return self.create_error_response("Upgrade your plan to continue using this feature.") 
+                    return self.create_error_response("Upgrade your plan to continue using this feature.", 403)
                             
                 if not current_user:
                     return self.create_error_response("You are not authorized to access this resource", 401)
@@ -425,12 +527,14 @@ class Server:
                         }
                     )
 
-                    return jsonify({"message": "Your request has been successfully placed in the RabbitMQ queue and will be processed shortly"}), 200
+                    return jsonify({"message": "Your request has been successfully placed in the RabbitMQ queue and will be processed shortly"}), 201
 
                 except Exception:
+                    self.app.logger.exception('Error during publishing message to queue in summarize')
                     return self.create_error_response('Error during publishing message to queue in summarize', 500)
                 
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/check_summarize', methods=['POST'])
@@ -445,7 +549,7 @@ class Server:
                     return response_check_and_apply_block
 
                 if self.user_is_free(current_user):
-                    return self.create_error_response("Upgrade your plan to continue using this feature.") 
+                    return self.create_error_response("Upgrade your plan to continue using this feature.", 403)
 
                 if not current_user:
                     return self.create_error_response("You are not authorized to access this resource", 401)
@@ -535,6 +639,7 @@ class Server:
                 return jsonify(queue_data), 200
 
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/summarize/files', methods=['GET'])
@@ -575,14 +680,17 @@ class Server:
                             "language": grid_out.language,
                             "username": grid_out.username,
                             "summary_at": grid_out.summary_at,
+                            "expires_at": getattr(grid_out, "expires_at", None),
                         })
 
                     return jsonify(files), 200
 
                 except Exception:
+                    self.app.logger.exception('Error during fetching documents from the database')
                     return self.create_error_response('Error during fetching documents from the database', 400)
 
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
 
                     
@@ -605,7 +713,8 @@ class Server:
 
                 try:
                     file_documents_collection = self.documents_collection.find_one({
-                        "_id": ObjectId(file_id)
+                        "_id": ObjectId(file_id),
+                        "username": current_user
                     })
 
                     if not file_documents_collection:
@@ -625,9 +734,11 @@ class Server:
                     )
                 
                 except Exception:
+                    self.app.logger.exception('Error during fetching document from the database')
                     return self.create_error_response('Error during fetching document from the database', 400)
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/questions', methods=['POST'])
@@ -643,7 +754,7 @@ class Server:
                     return response_check_and_apply_block
 
                 if self.user_is_free(current_user):
-                    return self.create_error_response("Upgrade your plan to continue using this feature.") 
+                    return self.create_error_response("Upgrade your plan to continue using this feature.", 403)
                                             
                 if not current_user:
                     return self.create_error_response("You are not authorized to access this resource", 401)
@@ -673,12 +784,12 @@ class Server:
                 
                 filename_nosecure = received_file.filename
                 filename_secure = secure_filename(filename_nosecure)
-                self.filepath_secure = os.path.join(self.output_path, filename_secure)
+                g.filepath_secure = os.path.join(self.output_path, f"{secrets.token_hex(8)}_{filename_secure}")
 
                 if len(filename_secure) > 200:
                     return self.create_error_response('File name exceeds the maximum length of 200 characters.', 400)
 
-                file_extension = self.filepath_secure.split('.')[-1].lower()
+                file_extension = g.filepath_secure.split('.')[-1].lower()
 
                 if file_extension not in self.valid_formats:
                     return self.create_error_response(f'Invalid format. Supported formats: {", ".join(self.valid_formats)}', 400)
@@ -687,11 +798,11 @@ class Server:
                     if extensions in filename_secure:
                         return self.create_error_response(f'The filename seems suspicious and contains a blocked extension: {extensions}', 400)
                 
-                received_file.save(self.filepath_secure)
+                received_file.save(g.filepath_secure)
                 
                 mime_detector = magic.Magic(mime=True)
                 expected_mime_type = self.expected_mime_types.get(file_extension)
-                detected_mime_type = mime_detector.from_file(self.filepath_secure)
+                detected_mime_type = mime_detector.from_file(g.filepath_secure)
                 
                 if expected_mime_type == 'text/markdown':
                     detected_mime_type = expected_mime_type
@@ -702,47 +813,52 @@ class Server:
                 match file_extension:
                     case 'md':
                         try:
-                            response_extract_text_markdown = ExtractText().extract_text_markdown(self.filepath_secure)
-                            data_value_extract_text_markdown = (response_extract_text_markdown.get('data') or '')[:500]
+                            response_extract_text_markdown = ExtractText().extract_text_markdown(g.filepath_secure)
+                            data_value_extract_text_markdown = (response_extract_text_markdown.get('data') or '')[:MAX_SOURCE_TEXT_CHARS]
                             if not data_value_extract_text_markdown.strip():
                                 return self.create_error_response('No extractable text found in the Markdown file', 400)
                             
                             merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_markdown}'
                             
                             try:
-                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
+                                response_generative_ai = Vertex().start_chat(merged_prompt_questions)
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
                                 
-                                return jsonify(response_generative_ai_json), 200
+                                return jsonify(response_generative_ai_json), 201
                             
                             except Exception:
+                                self.app.logger.exception("Error during chat generation")
                                 return self.create_error_response("Error during chat generation", 400)
                         
                         except Exception:
+                            self.app.logger.exception('Error during extraction of Markdown text')
                             return self.create_error_response('Error during extraction of Markdown text', 400)
 
                     case 'pdf':
                         try:
-                            response_extract_text_pdf = ExtractText().extract_text_pdf(self.filepath_secure)
-                            data_value_extract_text_pdf = (response_extract_text_pdf.get('data') or '')[:500]
+                            response_extract_text_pdf = ExtractText().extract_text_pdf(g.filepath_secure)
+                            data_value_extract_text_pdf = (response_extract_text_pdf.get('data') or '')[:MAX_SOURCE_TEXT_CHARS]
                             if not data_value_extract_text_pdf.strip():
                                 return self.create_error_response('No extractable text found in the PDF', 400)
                             
                             merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_pdf}'
                             
                             try:
-                                response_generative_ai = GenerativeAI().start_chat(merged_prompt_questions)
+                                response_generative_ai = Vertex().start_chat(merged_prompt_questions)
                                 response_generative_ai_json = json.loads(response_generative_ai['data'])
 
-                                return jsonify(response_generative_ai_json), 200
+                                return jsonify(response_generative_ai_json), 201
 
                             except Exception:
+                                self.app.logger.exception("Error during chat generation")
                                 return self.create_error_response("Error during chat generation", 400)
 
                         except Exception:
+                            self.app.logger.exception('Error during extraction of PDF text')
                             return self.create_error_response('Error during extraction of PDF text', 400)
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
             
         @self.app.route('/lectify/check_email_register', methods=['POST'])
@@ -804,6 +920,7 @@ class Server:
                 return jsonify({"message": "Verification code sent to email",}), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/verify_email_register', methods=['POST'])
@@ -872,6 +989,7 @@ class Server:
                 return jsonify({"message": "Email verified successfully"}), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/register', methods=['POST'])
@@ -913,7 +1031,7 @@ class Server:
 
                 for field, value in fields.items():
                     if not isinstance(value, str):
-                        return self.create_error_response(f"{field} must be a string"), 400
+                        return self.create_error_response(f"{field} must be a string", 400)
                 
                 username = fields["username"].strip().lower()
                 password = fields["password"].strip()
@@ -960,6 +1078,7 @@ class Server:
                 return jsonify({"message": "User registered successfully"}), 201
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/login', methods=['POST'])
@@ -990,17 +1109,17 @@ class Server:
                 password = data.get("password")
 
                 if username and not isinstance(username, str):
-                    return self.create_error_response("Username must be a string"), 400
+                    return self.create_error_response("Username must be a string", 400)
 
                 if email and not isinstance(email, str):
-                    return self.create_error_response("Email must be a string"), 400
+                    return self.create_error_response("Email must be a string", 400)
 
                 if password and not isinstance(password, str):
-                    return self.create_error_response("Password must be a string"), 400
+                    return self.create_error_response("Password must be a string", 400)
 
-                username = username.strip().lower()
-                email = email.strip().lower()
-                password = password.strip()
+                username = (username or "").strip().lower()
+                email = (email or "").strip().lower()
+                password = (password or "").strip()
 
                 if not username and not email:
                     return self.create_error_response("You must provide either a username or an email", 400)
@@ -1008,7 +1127,7 @@ class Server:
                 if not password:
                     return self.create_error_response("Password is required", 400)
 
-                if not is_valid_email(email):
+                if email and not is_valid_email(email):
                     return self.create_error_response("Invalid email format", 400)
                 
                 if email:
@@ -1055,6 +1174,7 @@ class Server:
                 }), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/profile', methods=['GET'])
@@ -1094,8 +1214,49 @@ class Server:
                 return jsonify(profile_data), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
         
+        @self.app.route('/lectify/usage', methods=['GET'])
+        @self.limiter.limit("30 per minute")
+        @jwt_required()
+        def lectify_usage() -> Response:
+            try:
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
+
+                current_info_user = self.get_user(current_user)
+
+                if not current_info_user:
+                    return self.create_error_response("User not found", 404)
+
+                if self.user_is_free(current_user):
+                    return jsonify({"is_free": True, "plan": None, "features": {}}), 200
+
+                plan = current_info_user.get("plan")
+                limit_string = PLAN_LIMITS.get(plan, ABUSE_LIMIT)
+
+                features = {
+                    name: self.usage_for(current_user, endpoint, limit_string)
+                    for name, endpoint in self.QUOTA_FEATURES.items()
+                }
+
+                return jsonify({
+                    "is_free": False,
+                    "plan": plan,
+                    "features": features
+                }), 200
+
+            except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
+                return self.create_error_response('An error occurred while processing the request', 500)
+
         @self.app.route('/lectify/refresh_token', methods=['POST'])
         @self.limiter.limit("5 per minute")
         @jwt_required(refresh=True)
@@ -1120,6 +1281,7 @@ class Server:
                     }), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/update_profile', methods=['PATCH'])
@@ -1220,6 +1382,7 @@ class Server:
                 }), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/update_image_profile', methods=['PUT'])
@@ -1273,26 +1436,26 @@ class Server:
                 filename_secure = secure_filename(filename_nosecure)
 
                 file_extension = filename_secure.split('.')[-1].lower()
-                self.filepath_secure = os.path.join(self.output_path, f'image_profile_{current_user}.{file_extension}')
+                g.filepath_secure = os.path.join(self.output_path, f'image_profile_{current_user}_{secrets.token_hex(8)}.{file_extension}')
                 
                 if file_extension not in self.valid_format_images:
-                    return self.create_error_response(f'Invalid format. Supported formats: {", ".join(self.valid_formats_images)}', 400)
+                    return self.create_error_response(f'Invalid format. Supported formats: {", ".join(self.valid_format_images)}', 400)
                 
                 for extensions in self.blocked_extensions:
                     if extensions in filename_secure:
                         return self.create_error_response(f'The filename seems suspicious and contains a blocked extension: {extensions}', 400)
                 
-                received_file.save(self.filepath_secure)
+                received_file.save(g.filepath_secure)
 
                 mime_detector = magic.Magic(mime=True)
                 expected_mime_type = self.expected_image_mime_types.get(file_extension)
-                detected_mime_type = mime_detector.from_file(self.filepath_secure)
+                detected_mime_type = mime_detector.from_file(g.filepath_secure)
 
                 if detected_mime_type != expected_mime_type:
                     return self.create_error_response(f'Invalid file type. Detected: {detected_mime_type}. Expected: {expected_mime_type}', 400)
 
                 upload_result = self.cloudinary.uploader.upload(
-                    self.filepath_secure,
+                    g.filepath_secure,
                     public_id=f'image_profile_{current_user}',
                     overwrite=True, 
                     resource_type="image",
@@ -1317,13 +1480,11 @@ class Server:
                 return jsonify({"message": "Profile image updated successfully", "image_profile": image_url}), 200
                 
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
 
             finally:
-                clean_up(
-                    getattr(self, "filepath_secure", None),
-                    getattr(self, "filepath_secure_webp", None),
-                )
+                clean_up(g.get("filepath_secure"))
 
         @self.app.route('/lectify/ping_email_delete_account', methods=['POST'])
         @self.limiter.limit("5 per minute")
@@ -1386,6 +1547,7 @@ class Server:
                 return jsonify({"message": "Verification code sent to email",}), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/pong_email_delete_account', methods=['DELETE'])
@@ -1450,12 +1612,15 @@ class Server:
                 if check_email_data['token'] != token:
                     return self.create_error_response("Invalid verification token", 400)
                 
+                self.delete_user_documents(current_user)
+                self.check_summarize_collection.delete_one({"username": current_user})
                 self.users_collection.delete_one({"username": current_user})
                 self.check_email_collection.delete_one({"email": email})
 
                 return jsonify({"message": "Account deleted successfully"}), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/ping_email_reset_password', methods=['POST'])
@@ -1489,13 +1654,13 @@ class Server:
                 reset_password_page_url = data.get("reset_password_page_url")
 
                 if not isinstance(email, str):
-                    return self.create_error_response("Email must be a string"), 400
+                    return self.create_error_response("Email must be a string", 400)
 
                 if not isinstance(base_url, str):
-                    return self.create_error_response("Base Url must be a string"), 400
+                    return self.create_error_response("Base Url must be a string", 400)
 
                 if not isinstance(reset_password_page_url, str):
-                    return self.create_error_response("Reset Password Page Url must be a string"), 400
+                    return self.create_error_response("Reset Password Page Url must be a string", 400)
 
                 email = email.strip().lower()
                 base_url = base_url.strip().lower()
@@ -1528,6 +1693,7 @@ class Server:
                 return jsonify({"message": "Verification sent to email",}), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
         
         @self.app.route('/lectify/pong_email_reset_password', methods=['POST'])
@@ -1561,13 +1727,13 @@ class Server:
                 new_password = data.get("new_password")
 
                 if not isinstance(email, str):
-                    return self.create_error_response("Email must be a string"), 400
+                    return self.create_error_response("Email must be a string", 400)
 
                 if not isinstance(token, str):
-                    return self.create_error_response("Token must be a string"), 400
+                    return self.create_error_response("Token must be a string", 400)
 
                 if not isinstance(new_password, str):
-                    return self.create_error_response("New Password must be a string"), 400
+                    return self.create_error_response("New Password must be a string", 400)
 
                 email = email.strip().lower()
                 token = token.strip()
@@ -1606,12 +1772,13 @@ class Server:
                 return jsonify({"message": "Password reset successfully"}), 200
             
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
 
-        @self.app.route('/misa/checkout', methods=['POST'])
+        @self.app.route('/lectify/checkout', methods=['POST'])
         @self.limiter.limit("10 per minute")
         @jwt_required()
-        def misa_checkout() -> Response:
+        def lectify_checkout() -> Response:
             try:
                 current_user = self.user_or_ip()
                 
@@ -1701,7 +1868,7 @@ class Server:
                 preference_data = {
                     "items": [
                         {
-                            "title": "Misa Premium",
+                            "title": "Lectify Premium",
                             "quantity": 1,
                             "unit_price": price,
                             "currency_id": "BRL"
@@ -1735,10 +1902,11 @@ class Server:
                 return jsonify({'checkout_url': preference["init_point"]}), 200
 
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request.')
                 return self.create_error_response('An error occurred while processing the request.', 500)
 
-        @self.app.route('/misa/webhook', methods=['POST'])
-        def misa_webhook() -> Response:
+        @self.app.route('/lectify/webhook', methods=['POST'])
+        def lectify_webhook() -> Response:
             try:
                 data = request.get_json(silent=True) or {}
 
@@ -1805,23 +1973,14 @@ class Server:
                         return self.create_error_response("User not found", 404)
 
                     now = datetime.now(timezone.utc)
-                    subscription_end = refunded_user.get("subscription_end")
-
-                    if isinstance(subscription_end, datetime):
-                        if subscription_end.tzinfo is None:
-                            subscription_end = subscription_end.replace(tzinfo=timezone.utc)
-                    else:
-                        subscription_end = None
-
-                    if subscription_end:
-                        subscription_end -= timedelta(days=self.plans[plan]["days"])
+                    remaining_plan, subscription_end = self.rebuild_subscription(uid)
 
                     still_active = bool(subscription_end and subscription_end > now)
 
                     update_user = {
                         "$set": {
                             "is_free": not still_active,
-                            "plan": refunded_user.get("plan") if still_active else None,
+                            "plan": remaining_plan if still_active else None,
                             "subscription_end": subscription_end if still_active else None
                         }
                     }
@@ -1829,7 +1988,7 @@ class Server:
                     if refunded_user.get("mercadopago_payment_id") == str(payment_id):
                         update_user["$unset"] = {"mercadopago_payment_id": ""}
 
-                    self.users_collection.update_one({"uid": uid}, update_user)
+                    self.users_collection.update_one({"username": uid}, update_user)
 
                     return jsonify({
                         "message": "Payment reversed and period revoked" if still_active else "Payment reversed and plan revoked",
@@ -1876,7 +2035,7 @@ class Server:
                 current_plan = current_info_user.get("plan") if subscription_is_active else None
                 effective_plan = plan
 
-                if current_plan and STORAGE_LIMITS.get(current_plan, 0) > STORAGE_LIMITS.get(plan, 0):
+                if current_plan and PLAN_RANKS.get(current_plan, 0) > PLAN_RANKS.get(plan, 0):
                     effective_plan = current_plan
 
                 self.transactions_collection.update_one(
@@ -1894,7 +2053,7 @@ class Server:
                 )
                 
                 self.users_collection.update_one(
-                    {"uid": uid},
+                    {"username": uid},
                     {
                         "$set": {
                             "is_free": False,
@@ -1913,6 +2072,7 @@ class Server:
                 }), 200
 
             except Exception:
+                self.app.logger.exception('An error occurred while processing the request.')
                 return self.create_error_response('An error occurred while processing the request.', 500)
                 
     def run_production(self, host: str = '0.0.0.0', port: int = 5000) -> None:
