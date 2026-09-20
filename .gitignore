@@ -12,9 +12,6 @@ dump.rdb
 # IDE 
 .vscode/
 
-# Ignore the test folder
-tests/
-
 # Docker 
 *.tar
 
@@ -23,6 +20,7 @@ tests/
 
 # Markdown files
 *.md
+!README.md
 
 # PDF files
 *.pdf
