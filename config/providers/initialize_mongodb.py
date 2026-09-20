@@ -20,6 +20,11 @@ def initialize_mongodb():
     documents_collection.create_index("expires_at")
     documents_collection.create_index("username")
 
+    questions_collection = db["questions"]
+    questions_collection.create_index([("username", 1), ("source_hash", 1)], unique=True)
+    questions_collection.create_index("file_id")
+    questions_collection.create_index("expires_at")
+
     check_email_collection = db["check_email"]
     check_email_collection.create_index("email", unique=True)
     check_email_collection.create_index("timestamp", expireAfterSeconds=600)
@@ -41,6 +46,7 @@ def initialize_mongodb():
         "grid_fs": grid_fs,
         "documents_collection": documents_collection,
         "chunks_collection": chunks_collection,
+        "questions_collection": questions_collection,
         "check_email_collection": check_email_collection,
         "users_collection": users_collection,
         "check_summarize_collection": check_summarize_collection,

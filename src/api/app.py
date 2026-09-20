@@ -1,5 +1,6 @@
 from src.modules.vertex_ai import Vertex
 from src.modules.extract_text import ExtractText
+from src.modules.retention import Retention
 
 from src.rabbitmq.publisher import publish_message
 
@@ -63,6 +64,7 @@ class Server:
 
         self.grid_fs = mongo["grid_fs"]
         self.documents_collection = mongo["documents_collection"]
+        self.questions_collection: Collection = mongo["questions_collection"]
         self.check_email_collection: Collection = mongo["check_email_collection"]
         self.users_collection: Collection = mongo["users_collection"]
         self.check_summarize_collection: Collection = mongo["check_summarize_collection"]
@@ -71,6 +73,13 @@ class Server:
         self.mercadopago_sdk = mercadopago["mercadopago"]
         self.mercadopago_webhook_secret = mercadopago["webhook_secret"]
         self.plans = mercadopago['plans']
+
+        self.retention = Retention(
+            mongo["grid_fs"],
+            mongo["documents_collection"],
+            mongo["chunks_collection"],
+            mongo["questions_collection"]
+        )
 
         self.redis_client = redis["redis_client"]
         self.limiter = redis["limiter"]
@@ -117,10 +126,123 @@ class Server:
         removed = 0
 
         for document in documents:
-            self.grid_fs.delete(document["_id"])
+            self.retention.delete_document(document["_id"])
             removed += 1
 
+        self.questions_collection.delete_many({"username": username})
+
         return removed
+
+    def summary_text(self, grid_out) -> str:
+        filetype = getattr(grid_out, "filetype", "md")
+
+        os.makedirs(self.output_path, exist_ok=True)
+        g.filepath_secure = os.path.join(self.output_path, f"{secrets.token_hex(8)}.{filetype}")
+
+        with open(g.filepath_secure, 'wb') as file:
+            file.write(grid_out.read())
+
+        if filetype == 'pdf':
+            return ExtractText().extract_text_pdf(g.filepath_secure).get('data') or ''
+
+        return ExtractText().extract_text_markdown(g.filepath_secure).get('data') or ''
+
+    def parse_questions_json(self, raw: str) -> dict:
+        text = (raw or '').strip()
+
+        if text.startswith("```"):
+            text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+
+        return json.loads(text)
+
+    def questions_source_from_upload(self, username: str) -> tuple:
+        files = request.files.getlist('file')
+
+        if len(files) != 1:
+            return None, self.create_error_response('Exactly one file must be uploaded', 400)
+
+        received_file = files[0]
+
+        if not received_file.filename:
+            return None, self.create_error_response('No files received', 400)
+
+        file_size_bytes = len(received_file.read())
+        received_file.seek(0)
+
+        if (file_size_bytes / 1024) / 1024 > 5:
+            return None, self.create_error_response('File size exceeds the maximum limit of 5 MB.', 413)
+
+        if not os.path.exists(self.output_path):
+            os.makedirs(self.output_path)
+
+        filename_secure = secure_filename(received_file.filename)
+        g.filepath_secure = os.path.join(self.output_path, f"{secrets.token_hex(8)}_{filename_secure}")
+
+        if len(filename_secure) > 200:
+            return None, self.create_error_response('File name exceeds the maximum length of 200 characters.', 400)
+
+        file_extension = g.filepath_secure.split('.')[-1].lower()
+
+        if file_extension not in self.valid_formats:
+            return None, self.create_error_response(f'Invalid format. Supported formats: {", ".join(self.valid_formats)}', 400)
+
+        for extensions in self.blocked_extensions:
+            if extensions in filename_secure:
+                return None, self.create_error_response(f'The filename seems suspicious and contains a blocked extension: {extensions}', 400)
+
+        received_file.save(g.filepath_secure)
+
+        mime_detector = magic.Magic(mime=True)
+        expected_mime_type = self.expected_mime_types.get(file_extension)
+        detected_mime_type = mime_detector.from_file(g.filepath_secure)
+
+        if expected_mime_type == 'text/markdown':
+            detected_mime_type = expected_mime_type
+
+        if detected_mime_type != expected_mime_type:
+            return None, self.create_error_response(f'Invalid file type. Detected: {detected_mime_type}. Expected: {expected_mime_type}', 400)
+
+        label = 'Markdown' if file_extension == 'md' else 'PDF'
+
+        try:
+            if file_extension == 'md':
+                extracted = ExtractText().extract_text_markdown(g.filepath_secure)
+
+            else:
+                extracted = ExtractText().extract_text_pdf(g.filepath_secure)
+
+        except Exception:
+            self.app.logger.exception(f'Error during extraction of {label} text')
+            return None, self.create_error_response(f'Error during extraction of {label} text', 400)
+
+        source_text = (extracted.get('data') or '')[:MAX_SOURCE_TEXT_CHARS]
+
+        if not source_text.strip():
+            suffix = 'Markdown file' if file_extension == 'md' else 'PDF'
+            return None, self.create_error_response(f'No extractable text found in the {suffix}', 400)
+
+        return (source_text.strip(), None, self.retention.expires_at(), filename_secure), None
+
+    def questions_source_from_summary(self, username: str, file_id: str) -> tuple:
+        try:
+            object_id = ObjectId(file_id)
+
+        except Exception:
+            return None, self.create_error_response('Invalid file id', 400)
+
+        document = self.documents_collection.find_one({"_id": object_id, "username": username})
+
+        if not document:
+            return None, self.create_error_response('Document not found in the database', 404)
+
+        grid_out = self.grid_fs.get(object_id)
+        source_text = self.summary_text(grid_out)[:MAX_SOURCE_TEXT_CHARS].strip()
+
+        if not source_text:
+            return None, self.create_error_response('No extractable text found in the summary', 400)
+
+        return (source_text, object_id, document.get("expires_at"), grid_out.filename), None
     
     def generate_code(self) -> str:
         return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6)).strip()
@@ -643,7 +765,7 @@ class Server:
                 return self.create_error_response('An error occurred while processing the request', 500)
 
         @self.app.route('/lectify/summarize/files', methods=['GET'])
-        @self.limiter.limit("5 per minute")
+        @self.limiter.limit("30 per minute")
         @jwt_required()
         def lectify_summarize_files() -> Response:
             try:
@@ -695,7 +817,7 @@ class Server:
 
                     
         @self.app.route('/lectify/summarize/files/<string:file_id>', methods=['GET'])
-        @self.limiter.limit("5 per minute")
+        @self.limiter.limit("20 per minute")
         @jwt_required()
         def lectify_summarize_files_by_id(file_id: str) -> Response:
             try:
@@ -741,6 +863,129 @@ class Server:
                 self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
 
+        @self.app.route('/lectify/summarize/files/<string:file_id>', methods=['DELETE'])
+        @self.limiter.limit("10 per minute")
+        @jwt_required()
+        def lectify_summarize_files_delete(file_id: str) -> Response:
+            try:
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
+
+                if not self.get_user(current_user):
+                    return self.create_error_response("User not found", 404)
+
+                try:
+                    object_id = ObjectId(file_id)
+
+                except Exception:
+                    return self.create_error_response('Invalid file id', 400)
+
+                file_documents_collection = self.documents_collection.find_one({
+                    "_id": object_id,
+                    "username": current_user
+                })
+
+                if not file_documents_collection:
+                    return self.create_error_response('Document not found in the database', 404)
+
+                removed_questions = self.retention.delete_document(object_id)
+
+                return jsonify({
+                    "message": "Document deleted successfully",
+                    "removed_questions": removed_questions
+                }), 200
+
+            except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
+                return self.create_error_response('An error occurred while processing the request', 500)
+
+        @self.app.route('/lectify/questions', methods=['GET'])
+        @self.limiter.limit("30 per minute")
+        @jwt_required()
+        def lectify_questions_list() -> Response:
+            try:
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
+
+                if not self.get_user(current_user):
+                    return self.create_error_response("User not found", 404)
+
+                quizzes = self.questions_collection.find(
+                    {"username": current_user},
+                    {"questions": 0, "source_hash": 0}
+                ).sort("created_at", -1)
+
+                return jsonify([
+                    {
+                        "id": str(quiz["_id"]),
+                        "title": quiz.get("title"),
+                        "file_id": str(quiz["file_id"]) if quiz.get("file_id") else None,
+                        "created_at": quiz.get("created_at"),
+                        "expires_at": quiz.get("expires_at")
+                    }
+                    for quiz in quizzes
+                ]), 200
+
+            except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
+                return self.create_error_response('An error occurred while processing the request', 500)
+
+        @self.app.route('/lectify/questions/<string:question_id>', methods=['GET'])
+        @self.limiter.limit("30 per minute")
+        @jwt_required()
+        def lectify_questions_by_id(question_id: str) -> Response:
+            try:
+                current_user = self.user_or_ip()
+
+                response_check_and_apply_block = self.check_and_apply_block(current_user, increment=False)
+                if response_check_and_apply_block:
+                    return response_check_and_apply_block
+
+                if not current_user:
+                    return self.create_error_response("You are not authorized to access this resource", 401)
+
+                if not self.get_user(current_user):
+                    return self.create_error_response("User not found", 404)
+
+                try:
+                    object_id = ObjectId(question_id)
+
+                except Exception:
+                    return self.create_error_response('Invalid question id', 400)
+
+                quiz = self.questions_collection.find_one({
+                    "_id": object_id,
+                    "username": current_user
+                })
+
+                if not quiz:
+                    return self.create_error_response('Questions not found in the database', 404)
+
+                return jsonify({
+                    "id": str(quiz["_id"]),
+                    "title": quiz.get("title"),
+                    "file_id": str(quiz["file_id"]) if quiz.get("file_id") else None,
+                    "created_at": quiz.get("created_at"),
+                    "expires_at": quiz.get("expires_at"),
+                    "questions": quiz.get("questions")
+                }), 200
+
+            except Exception:
+                self.app.logger.exception('An error occurred while processing the request')
+                return self.create_error_response('An error occurred while processing the request', 500)
+
         @self.app.route('/lectify/questions', methods=['POST'])
         @self.limiter.limit(ABUSE_LIMIT, scope="abuse")
         @self.limiter.limit(self.get_dynamic_limit, deduct_when=lambda response: response.status_code == 201)
@@ -755,112 +1000,69 @@ class Server:
 
                 if self.user_is_free(current_user):
                     return self.create_error_response("Upgrade your plan to continue using this feature.", 403)
-                                            
+
                 if not current_user:
                     return self.create_error_response("You are not authorized to access this resource", 401)
 
                 if not self.get_user(current_user):
                     return self.create_error_response("User not found", 404)
-            
-                files = request.files.getlist('file')
 
-                if len(files) != 1:
-                    return self.create_error_response('Exactly one file must be uploaded', 400)
+                file_id = request.form.get('file_id') or (request.get_json(silent=True) or {}).get('file_id')
 
-                received_file = files[0]
+                if file_id:
+                    source, error = self.questions_source_from_summary(current_user, file_id)
 
-                if not received_file.filename:
-                    return self.create_error_response('No files received', 400)
+                else:
+                    source, error = self.questions_source_from_upload(current_user)
 
-                file_size_bytes = len(received_file.read())
-                received_file.seek(0)
-                file_size_mb = (file_size_bytes / 1024) / 1024
+                if error:
+                    return error
 
-                if file_size_mb > 5:
-                    return self.create_error_response('File size exceeds the maximum limit of 5 MB.', 413)
+                source_text, linked_file_id, expires_at, title = source
+                source_hash = hashlib.sha256(source_text.encode('utf-8')).hexdigest()
 
-                if not os.path.exists(self.output_path):
-                    os.makedirs(self.output_path)
-                
-                filename_nosecure = received_file.filename
-                filename_secure = secure_filename(filename_nosecure)
-                g.filepath_secure = os.path.join(self.output_path, f"{secrets.token_hex(8)}_{filename_secure}")
+                stored_questions = self.questions_collection.find_one({
+                    "username": current_user,
+                    "source_hash": source_hash
+                })
 
-                if len(filename_secure) > 200:
-                    return self.create_error_response('File name exceeds the maximum length of 200 characters.', 400)
+                if stored_questions:
+                    if linked_file_id and not stored_questions.get("file_id"):
+                        self.questions_collection.update_one(
+                            {"_id": stored_questions["_id"]},
+                            {"$set": {"file_id": linked_file_id, "expires_at": expires_at}}
+                        )
 
-                file_extension = g.filepath_secure.split('.')[-1].lower()
+                    return jsonify(stored_questions["questions"]), 200
 
-                if file_extension not in self.valid_formats:
-                    return self.create_error_response(f'Invalid format. Supported formats: {", ".join(self.valid_formats)}', 400)
-                
-                for extensions in self.blocked_extensions:
-                    if extensions in filename_secure:
-                        return self.create_error_response(f'The filename seems suspicious and contains a blocked extension: {extensions}', 400)
-                
-                received_file.save(g.filepath_secure)
-                
-                mime_detector = magic.Magic(mime=True)
-                expected_mime_type = self.expected_mime_types.get(file_extension)
-                detected_mime_type = mime_detector.from_file(g.filepath_secure)
-                
-                if expected_mime_type == 'text/markdown':
-                    detected_mime_type = expected_mime_type
-                
-                if detected_mime_type != expected_mime_type:
-                    return self.create_error_response(f'Invalid file type. Detected: {detected_mime_type}. Expected: {expected_mime_type}', 400)
+                try:
+                    response_generative_ai = Vertex().start_chat(f'{prompt_questions}{source_text}')
+                    response_generative_ai_json = self.parse_questions_json(response_generative_ai['data'])
 
-                match file_extension:
-                    case 'md':
-                        try:
-                            response_extract_text_markdown = ExtractText().extract_text_markdown(g.filepath_secure)
-                            data_value_extract_text_markdown = (response_extract_text_markdown.get('data') or '')[:MAX_SOURCE_TEXT_CHARS]
-                            if not data_value_extract_text_markdown.strip():
-                                return self.create_error_response('No extractable text found in the Markdown file', 400)
-                            
-                            merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_markdown}'
-                            
-                            try:
-                                response_generative_ai = Vertex().start_chat(merged_prompt_questions)
-                                response_generative_ai_json = json.loads(response_generative_ai['data'])
-                                
-                                return jsonify(response_generative_ai_json), 201
-                            
-                            except Exception:
-                                self.app.logger.exception("Error during chat generation")
-                                return self.create_error_response("Error during chat generation", 400)
-                        
-                        except Exception:
-                            self.app.logger.exception('Error during extraction of Markdown text')
-                            return self.create_error_response('Error during extraction of Markdown text', 400)
+                except Exception:
+                    self.app.logger.exception("Error during chat generation")
+                    return self.create_error_response("Error during chat generation", 400)
 
-                    case 'pdf':
-                        try:
-                            response_extract_text_pdf = ExtractText().extract_text_pdf(g.filepath_secure)
-                            data_value_extract_text_pdf = (response_extract_text_pdf.get('data') or '')[:MAX_SOURCE_TEXT_CHARS]
-                            if not data_value_extract_text_pdf.strip():
-                                return self.create_error_response('No extractable text found in the PDF', 400)
-                            
-                            merged_prompt_questions = f'{prompt_questions}{data_value_extract_text_pdf}'
-                            
-                            try:
-                                response_generative_ai = Vertex().start_chat(merged_prompt_questions)
-                                response_generative_ai_json = json.loads(response_generative_ai['data'])
+                self.questions_collection.update_one(
+                    {"username": current_user, "source_hash": source_hash},
+                    {
+                        "$set": {
+                            "file_id": linked_file_id,
+                            "title": title,
+                            "questions": response_generative_ai_json,
+                            "created_at": datetime.now(timezone.utc),
+                            "expires_at": expires_at
+                        }
+                    },
+                    upsert=True
+                )
 
-                                return jsonify(response_generative_ai_json), 201
+                return jsonify(response_generative_ai_json), 201
 
-                            except Exception:
-                                self.app.logger.exception("Error during chat generation")
-                                return self.create_error_response("Error during chat generation", 400)
-
-                        except Exception:
-                            self.app.logger.exception('Error during extraction of PDF text')
-                            return self.create_error_response('Error during extraction of PDF text', 400)
-            
             except Exception:
                 self.app.logger.exception('An error occurred while processing the request')
                 return self.create_error_response('An error occurred while processing the request', 500)
-            
+
         @self.app.route('/lectify/check_email_register', methods=['POST'])
         @self.limiter.limit("5 per minute")
         def lectify_check_email_register() -> Response:
