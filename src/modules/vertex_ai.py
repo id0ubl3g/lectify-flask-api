@@ -2,6 +2,7 @@ from src.utils.return_responses import create_success_return_response
 from src.utils.system_utils import google_credentials_path
 
 from google.oauth2 import service_account
+from google.genai import types
 from google import genai
 from dotenv import load_dotenv
 import os
@@ -25,6 +26,7 @@ class Vertex:
             "temperature": 0,
             "top_p": 0.9,
             "top_k": 40,
+            "thinking_config": types.ThinkingConfig(thinking_budget=0),
         }
 
     def start_chat(self, input_text: str) -> dict:
