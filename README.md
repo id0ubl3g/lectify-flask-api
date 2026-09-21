@@ -144,7 +144,8 @@ Base URLs, etc.
 
 Sensitive credentials should not be committed to the repository.
 
-Vertex AI (summaries and quiz generation) and Speech-to-Text both authenticate with a Google Cloud service account.
+Vertex AI authenticates with a Google Cloud service account. It handles summaries, quiz
+generation and the transcription of videos that have no captions.
 
 Set the path where the credentials file lives. This is the only variable that points to it, and both the API and the worker read it:
 
