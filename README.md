@@ -23,8 +23,11 @@
 - [Prerequisites](#prerequisites)
 - [Manual Installation (Ubuntu/Debian)](#manual-installation-ubuntudebian)
 - [Running the Application](#running-the-application)
+  - [Summarize Queue](#summarize-queue)
 - [API Documentation](#api-documentation)
   - [Endpoints](#endpoints)
+  - [Data Retention](#data-retention)
+  - [Summary Coverage](#summary-coverage)
   - [Core Endpoints](#core-endpoints)
     - [Lectify Summarize Endpoint](#lectify-summarize-endpoint)
     - [Lectify Check Summarize Endpoint](#lectify-check-summarize-endpoint)
@@ -173,6 +176,46 @@ make run
 
 The `make run` command automatically sets up the virtual environment, installs dependencies, starts Docker services, launches the Flask API, and runs the Summarize Worker.
 
+### Summarize Queue
+
+Jobs are published to a RabbitMQ queue named `summarize_jobs`, declared with
+`x-max-priority: 3`. The publisher sets a priority from the subscriber's plan, so annual
+subscribers are served before the others when jobs are waiting. Priority only reorders what
+is already queued; it never interrupts a job in progress.
+
+The worker consumes **one job at a time**, and the queue is shared by every user. Measured
+durations are 20 to 26 seconds for a video with captions and 56 to 150 seconds for one
+without, since the second case has to download the audio first.
+
+Both the API and the worker take the queue name and its arguments from
+`src/rabbitmq/publisher.py`, so the two always declare it the same way. RabbitMQ rejects a
+declaration whose arguments differ from the existing queue, with
+`PRECONDITION_FAILED - inequivalent arg`, and the worker then refuses to start rather than
+run in an inconsistent state.
+
+#### Deploying the queue change
+
+Earlier versions used a queue named `summarize_queue` with no priority. Renaming avoids the
+argument conflict, but nothing consumes the old queue any more, so **check that it is empty
+before deploying**. Messages left behind are never processed, and the users who submitted
+them keep polling a request that stays `processing` forever.
+
+```python
+from src.rabbitmq.connection import get_connection
+
+connection = get_connection()
+channel = connection.channel()
+status = channel.queue_declare(queue='summarize_queue', durable=True, passive=True)
+
+print(status.method.message_count)
+
+connection.close()
+```
+
+Once it reports zero, deploy and delete the old queue, either with
+`channel.queue_delete(queue='summarize_queue')` or from the RabbitMQ management interface on
+port 15672.
+
 ## API Documentation
 
 ### Endpoints
@@ -182,7 +225,7 @@ The `make run` command automatically sets up the virtual environment, installs d
 | `GET`    | `/health`                            | Liveness probe. Returns service status. No authentication.  |
 | `POST`   | `/lectify/summarize`                 | Generates a summary of a YouTube video in MD or PDF format. |
 | `POST`   | `/lectify/check_summarize`           | Checks the status of a summarization request.               |
-| `GET`    | `/lectify/summarize/files`           | List all summarized files of the current user.              |
+| `GET`    | `/lectify/summarize/files`           | List all summarized files of the current user, including when each one expires and whether it came from captions or audio. |
 | `GET`    | `/lectify/summarize/files/<file_id>` | Download a specific summarized file by ID.                  |
 | `DELETE` | `/lectify/summarize/files/<file_id>` | Delete a summarized file and the questions generated from it. |
 | `POST`   | `/lectify/questions`                 | Generates questions from an uploaded MD or PDF file, or from a stored summary via `file_id`. Cached results are returned without consuming quota. |
@@ -219,6 +262,21 @@ runs while the worker is running.
 
 Deleting a summary, either through `DELETE /lectify/summarize/files/<file_id>` or by
 deleting the account, also removes the questions generated from it.
+
+### Summary Coverage
+
+A video that has captions is summarized from its full transcript, up to 120,000 characters,
+which covers around 2.2 hours of speech. A video without captions has only its first 220
+seconds transcribed, because audio costs about 27 times more per hour of content than text
+does. The same one hour video yields roughly 53,000 characters through captions and 3,600
+through audio, so the two paths produce summaries of very different depth.
+
+`GET /lectify/summarize/files` reports which path was used in the `source` field, as
+`captions` or `audio`. Summaries created before this field existed report `null`, and those
+disappear on their own within the 7-day retention window.
+
+When the text is longer than the limit, the beginning and the end are both kept, separated
+by `[...]`, so the closing part of a lecture is never silently dropped.
 
 ### Core Endpoints
 
