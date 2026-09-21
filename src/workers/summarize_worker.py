@@ -1,5 +1,4 @@
 from src.modules.audio_downloader import AudioDownloader
-from src.modules.audio_recognition import AudioRecognition
 from src.modules.document_builder import DocumentBuilder
 from src.modules.convert_document import ConvertDocument
 from src.modules.vertex_ai import Vertex
@@ -8,10 +7,11 @@ from src.modules.transcript_fetcher import TranscriptFetcher
 from config.providers.initialize_mongodb import initialize_mongodb
 from config.prompt_config import prompt_summarize
 from config.input_config import MAX_SOURCE_TEXT_CHARS
-from src.utils.system_utils import clean_up, sanitize_filename, create_google_credentials
+from src.utils.system_utils import clean_up, sanitize_filename, create_google_credentials, trim_source_text
 from src.modules.retention import Retention
 
 from src.rabbitmq.connection import get_connection
+from src.rabbitmq.publisher import QUEUE_ARGUMENTS
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import threading
@@ -49,7 +49,8 @@ class Worker:
 
         self.channel.queue_declare(
             queue='summarize_queue',
-            durable=True
+            durable=True,
+            arguments=QUEUE_ARGUMENTS
         )
 
         mongo = initialize_mongodb()
@@ -157,24 +158,24 @@ class Worker:
                 relative_path_pdf = f'{base_path}.pdf'
 
             else:
-                print('message: No captions available, falling back to Speech-to-Text')
+                print('message: No captions available, transcribing the audio')
 
                 response_audio_downloader = AudioDownloader().download_audio(youtube_url)
                 relative_path_audio = (response_audio_downloader['data'])
                 relative_path_markdown = relative_path_audio.replace(".mp3", ".md")
                 relative_path_pdf = relative_path_audio.replace(".mp3", ".pdf")
 
-                response_audio_recognition = call_with_retry(
-                    lambda: AudioRecognition().recognize_audio(relative_path_audio, language_select)
+                response_transcription = call_with_retry(
+                    lambda: Vertex().transcribe_audio(relative_path_audio, language_select)
                 )
-                source_text = (response_audio_recognition['data'] or '').strip()
+                source_text = (response_transcription['data'] or '').strip()
 
             if not source_text:
                 raise ValueError(
-                    f'No transcript or speech recognized for language {language_select}'
+                    f'No transcript could be obtained for language {language_select}'
                 )
 
-            merged_prompt = f'{prompt_summarize}{source_text[:MAX_SOURCE_TEXT_CHARS]}'
+            merged_prompt = f'{prompt_summarize}{trim_source_text(source_text, MAX_SOURCE_TEXT_CHARS)}'
 
             response_generative_ai = call_with_retry(lambda: Vertex().start_chat(merged_prompt))
 

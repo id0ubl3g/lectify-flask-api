@@ -29,6 +29,21 @@ class Vertex:
             "thinking_config": types.ThinkingConfig(thinking_budget=0),
         }
 
+    def transcribe_audio(self, audio_path: str, language_select: str) -> dict:
+        with open(audio_path, "rb") as file:
+            audio = file.read()
+
+        response = self.client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                types.Part.from_bytes(data=audio, mime_type="audio/mpeg"),
+                f"Transcribe this audio verbatim in {language_select}. Output only the transcript text, nothing else."
+            ],
+            config=self.generation_config
+        )
+
+        return create_success_return_response("Audio successfully transcribed", response.text)
+
     def start_chat(self, input_text: str) -> dict:
         response = self.client.models.generate_content(
             model="gemini-2.5-flash",
