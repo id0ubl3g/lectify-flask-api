@@ -144,6 +144,8 @@ class Worker:
             transcript_data = response_transcript['data'] or {}
             source_text = (transcript_data.get('text') or '').strip()
 
+            source = 'captions' if source_text else 'audio'
+
             if source_text:
                 print('message: Using YouTube captions')
 
@@ -202,7 +204,8 @@ class Worker:
                         language=language_select,
                         username=username,
                         summary_at=datetime.now(timezone.utc),
-                        expires_at=expires_at
+                        expires_at=expires_at,
+                        source=source
                     )
             if output_format == 'md':
                 with open(relative_path_markdown, 'rb') as file:
@@ -214,7 +217,8 @@ class Worker:
                         language=language_select,
                         username=username,
                         summary_at=datetime.now(timezone.utc),
-                        expires_at=expires_at
+                        expires_at=expires_at,
+                        source=source
                     )
 
             self.set_status(job, "success")

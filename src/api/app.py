@@ -827,6 +827,7 @@ class Server:
                             "username": grid_out.username,
                             "summary_at": grid_out.summary_at,
                             "expires_at": getattr(grid_out, "expires_at", None),
+                            "source": getattr(grid_out, "source", None),
                         })
 
                     return jsonify(files), 200
