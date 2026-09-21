@@ -16,7 +16,7 @@ from config.providers.initialize_redis  import initialize_redis
 from config.providers.initialize_cloudinary  import initialize_cloudinary
 
 from src.utils.send_email_verification import SendEmailVerification
-from src.utils.system_utils import clean_up, is_valid_email, validate_user_data, sanitize_filename
+from src.utils.system_utils import clean_up, is_valid_email, validate_user_data, sanitize_filename, trim_source_text
 
 from flask import Flask, request, jsonify, send_file, Response, g
 from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token, jwt_required, get_jwt_identity, verify_jwt_in_request
@@ -216,7 +216,7 @@ class Server:
             self.app.logger.exception(f'Error during extraction of {label} text')
             return None, self.create_error_response(f'Error during extraction of {label} text', 400)
 
-        source_text = (extracted.get('data') or '')[:MAX_SOURCE_TEXT_CHARS]
+        source_text = trim_source_text(extracted.get('data') or '', MAX_SOURCE_TEXT_CHARS)
 
         if not source_text.strip():
             suffix = 'Markdown file' if file_extension == 'md' else 'PDF'
@@ -237,7 +237,7 @@ class Server:
             return None, self.create_error_response('Document not found in the database', 404)
 
         grid_out = self.grid_fs.get(object_id)
-        source_text = self.summary_text(grid_out)[:MAX_SOURCE_TEXT_CHARS].strip()
+        source_text = trim_source_text(self.summary_text(grid_out), MAX_SOURCE_TEXT_CHARS).strip()
 
         if not source_text:
             return None, self.create_error_response('No extractable text found in the summary', 400)
@@ -360,6 +360,16 @@ class Server:
         
         return None
 
+    def plan_limit_string(self, plan: str | None, endpoint: str | None) -> str:
+        quota = PLAN_LIMITS.get(plan)
+
+        if not quota:
+            return ABUSE_LIMIT
+
+        rate = ENDPOINT_RATE_LIMITS.get(endpoint)
+
+        return f'{rate};{quota}' if rate else quota
+
     def get_dynamic_limit(self) -> str:
         current_user = self.current_identity()
 
@@ -367,14 +377,24 @@ class Server:
             return ABUSE_LIMIT
 
         user_info = self.get_user(current_user) or {}
-        plan = user_info.get("plan")
 
-        return PLAN_LIMITS.get(plan, ABUSE_LIMIT)
+        return self.plan_limit_string(user_info.get("plan"), request.endpoint)
 
     QUOTA_FEATURES = {
         "summarize": "lectify_summarize",
         "questions": "lectify_questions"
     }
+
+    READ_ENDPOINTS = frozenset({
+        "health_check",
+        "lectify_profile",
+        "lectify_usage",
+        "lectify_check_summarize",
+        "lectify_summarize_files",
+        "lectify_summarize_files_by_id",
+        "lectify_questions_list",
+        "lectify_questions_by_id"
+    })
 
     def describe_period(self, item) -> tuple[str, int]:
         """Nome amigavel do periodo de um limite e sua duracao em segundos."""
@@ -511,7 +531,10 @@ class Server:
 
             current_user = self.current_identity()
 
-            response_check_and_apply_block = self.check_and_apply_block(current_user)
+            response_check_and_apply_block = self.check_and_apply_block(
+                current_user,
+                increment=request.endpoint not in self.READ_ENDPOINTS
+            )
 
             if response_check_and_apply_block:
                 return response_check_and_apply_block
@@ -646,7 +669,8 @@ class Server:
                             'language_select': language_select,
                             'output_format': output_format,
                             'username': current_user
-                        }
+                        },
+                        priority=PLAN_RANKS.get((self.get_user(current_user) or {}).get("plan"), 1)
                     )
 
                     return jsonify({"message": "Your request has been successfully placed in the RabbitMQ queue and will be processed shortly"}), 201
@@ -1442,10 +1466,8 @@ class Server:
                     return jsonify({"is_free": True, "plan": None, "features": {}}), 200
 
                 plan = current_info_user.get("plan")
-                limit_string = PLAN_LIMITS.get(plan, ABUSE_LIMIT)
-
                 features = {
-                    name: self.usage_for(current_user, endpoint, limit_string)
+                    name: self.usage_for(current_user, endpoint, self.plan_limit_string(plan, endpoint))
                     for name, endpoint in self.QUOTA_FEATURES.items()
                 }
 
