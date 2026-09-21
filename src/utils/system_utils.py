@@ -89,6 +89,16 @@ def sanitize_filename(name: str, max_length: int = 120) -> str:
 
     return name[:max_length]
 
+def trim_source_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+
+    marker = "\n\n[...]\n\n"
+    budget = max_chars - len(marker)
+    head = int(budget * 0.6)
+
+    return text[:head] + marker + text[head - budget:]
+
 def google_credentials_path() -> Path:
     return Path(
         os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "config/google-credentials.json"
