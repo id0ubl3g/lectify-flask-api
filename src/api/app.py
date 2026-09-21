@@ -2,7 +2,7 @@ from src.modules.vertex_ai import Vertex
 from src.modules.extract_text import ExtractText
 from src.modules.retention import Retention
 
-from src.rabbitmq.publisher import publish_message
+from src.rabbitmq.publisher import publish_message, SUMMARIZE_QUEUE
 
 from config.prompt_config import prompt_questions
 from config.file_config import *
@@ -663,7 +663,7 @@ class Server:
 
                 try:
                     publish_message(
-                        queue='summarize_queue',
+                        queue=SUMMARIZE_QUEUE,
                         message={
                             'youtube_url': youtube_url,
                             'language_select': language_select,

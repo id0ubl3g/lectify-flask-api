@@ -11,7 +11,7 @@ from src.utils.system_utils import clean_up, sanitize_filename, create_google_cr
 from src.modules.retention import Retention
 
 from src.rabbitmq.connection import get_connection
-from src.rabbitmq.publisher import QUEUE_ARGUMENTS
+from src.rabbitmq.publisher import SUMMARIZE_QUEUE, QUEUE_ARGUMENTS
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import threading
@@ -48,7 +48,7 @@ class Worker:
         self.channel = self.connection.channel()
 
         self.channel.queue_declare(
-            queue='summarize_queue',
+            queue=SUMMARIZE_QUEUE,
             durable=True,
             arguments=QUEUE_ARGUMENTS
         )
@@ -251,7 +251,7 @@ class Worker:
         self.start_retention_purge()
 
         self.channel.basic_consume(
-            queue='summarize_queue',
+            queue=SUMMARIZE_QUEUE,
             on_message_callback=self.callback
         )
 

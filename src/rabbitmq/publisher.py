@@ -3,6 +3,7 @@ from src.rabbitmq.connection import get_connection
 import pika
 import json
 
+SUMMARIZE_QUEUE = 'summarize_jobs'
 QUEUE_ARGUMENTS = {'x-max-priority': 3}
 
 def publish_message(queue: str, message: dict, priority: int = 1) -> None:
