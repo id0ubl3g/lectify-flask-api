@@ -7,7 +7,7 @@ import uuid
 import time
 import os
 
-AUDIO_CLIP_SECONDS = 120
+AUDIO_CLIP_SECONDS = 220
 
 class AudioDownloader:
     def __init__(self) -> None:
