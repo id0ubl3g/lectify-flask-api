@@ -475,10 +475,10 @@ class Server:
 
     def verify_mercadopago_signature(self, payment_id: str) -> bool:
         if not self.mercadopago_webhook_secret:
-            self.app.logger.warning(
-                "MERCADOPAGO_WEBHOOK_SECRET is not set: webhook signatures are not being verified."
+            self.app.logger.error(
+                "MERCADOPAGO_WEBHOOK_SECRET is not set: rejecting webhook because its signature cannot be verified."
             )
-            return True
+            return False
 
         signature = request.headers.get("x-signature", "")
         request_id = request.headers.get("x-request-id", "")
