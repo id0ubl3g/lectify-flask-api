@@ -2112,7 +2112,13 @@ class Server:
                 }
 
                 preference_response = self.mercadopago_sdk.preference().create(preference_data)
-                preference = preference_response["response"]
+                preference = preference_response.get("response") or {}
+
+                if preference_response.get("status") not in (200, 201) or not preference.get("init_point"):
+                    self.app.logger.error("Mercado Pago preference creation failed: %s", preference_response)
+                    self.transactions_collection.delete_one({"transaction_id": transaction_id})
+
+                    return self.create_error_response("Failed to create the checkout with Mercado Pago. Please try again.", 502)
 
                 self.transactions_collection.update_one(
                     {"transaction_id": transaction_id},
